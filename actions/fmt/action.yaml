@@ -1,0 +1,27 @@
+name: "Terraform Format"
+description: "Terraform format checks"
+
+inputs:
+  working-directory:
+    description: "Directory of the Terraform code"
+    required: false
+    default: "."
+  terraform-version:
+    description: "Terraform version to use"
+    required: false
+    default: "~1.7.0"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Check Formatting
+      shell: bash
+      run: |
+        cd ${{ inputs.working-directory }}
+        terraform fmt -check -diff -recursive

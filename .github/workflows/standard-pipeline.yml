@@ -1,0 +1,36 @@
+name: Standard Terraform Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Directory where terraform is initialised'
+        required: false
+        default: '.'
+        type: string
+      terraform-version:
+        description: "Terraform version to use"
+        required: false
+        default: "~1.7.0"
+        type: string
+
+jobs:
+  quality-checks:
+    name: "Quality & Security"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Terraform Fmt
+        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/fmt@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Terraform Validate
+        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/validate@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          terraform-version: ${{ inputs.terraform-version }}
+
+# TODO: TFLint is not part of the official terraform CLI and is more complex. Suggest keeping that in separate repo and pointing to it here, with the ability to disable

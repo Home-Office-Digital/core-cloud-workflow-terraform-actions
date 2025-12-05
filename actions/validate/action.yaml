@@ -27,16 +27,20 @@ runs:
 
     - name: Terraform Validate
       shell: bash
+      continue-on-error: true
       run: |
         VALIDATE_FILE="${{ github.workspace }}/validate.txt"
         cd ${{ inputs.working-directory }}
 
         terraform validate -no-color 2>&1 | tee "$VALIDATE_FILE"
+        EXIT_CODE=$?
 
-        if [ -s "$VALIDATE_FILE" ]; then
-          echo "Validate_Outcome=failed" >> $GITHUB_ENV
-        else
+        if [ $EXIT_CODE -eq 0 ]; then
           echo "Validate_Outcome=success" >> $GITHUB_ENV
+          echo "Validator found no fatal errors."
+        else
+          echo "Validate_Outcome=failed" >> $GITHUB_ENV
+          echo "Validator found errors."
         fi
 
     # Generate summary for PR/Actions UI
@@ -50,6 +54,14 @@ runs:
 
         if [ "$Validate_Outcome" == "success" ]; then
           echo "✅ **Status:** Passed - No validation issues detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>Click to expand for any warnings</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```warnings' >> $GITHUB_STEP_SUMMARY
+          cat "$VALIDATE_FILE" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
         else
           echo "❌ **Status:** Failed - Validation issues detected" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

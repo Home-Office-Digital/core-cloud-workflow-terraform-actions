@@ -31,7 +31,7 @@ runs:
         VALIDATE_FILE="${{ github.workspace }}/validate.txt"
         cd ${{ inputs.working-directory }}
 
-        terraform validate 2>&1 | tee "$VALIDATE_FILE"
+        terraform validate -no-color 2>&1 | tee "$VALIDATE_FILE"
 
         if [ -s "$VALIDATE_FILE" ]; then
           echo "Validate_Outcome=failed" >> $GITHUB_ENV
@@ -63,6 +63,14 @@ runs:
         fi
 
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
-        echo "- Working Directory: \`${{ inputs.working_directory }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- Terraform Version: \`${{ inputs.terraform_version }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Working Directory | \`${{ inputs.working-directory }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Terraform Version | \`${{ inputs.terraform-version }}\` |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY

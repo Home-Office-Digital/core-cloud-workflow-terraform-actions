@@ -23,5 +23,40 @@ runs:
     - name: Check Formatting
       shell: bash
       run: |
-        cd ${{ inputs.working-directory }}
-        terraform fmt -check -diff -recursive
+        DIFF_FILE="${{ github.workspace }}/fmt_diff.txt"
+        cd "${{ inputs.working_directory }}"
+        terraform fmt -recursive -diff -check 2>&1 | tee fmt_diff.txt
+
+        if [ -s fmt_diff.txt ]; then
+          echo "issues_found=true" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "issues_found=false" >> $GITHUB_OUTPUT
+        fi
+
+    # Generate summary for PR/Actions UI
+    - name: Generate fmt Diff Summary
+      if: always()
+      shell: bash
+      run: |
+        DIFF_FILE="${{ github.workspace }}/fmt_diff.txt"
+        echo "## Terraform FMT Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ steps.fmt-scan.outcome }}" == "success" ]; then
+          echo "✅ **Status:** Passed - No formatting issues detected" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Status:** Failed - Formatting issues detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>Click to expand diff</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```diff' >> $GITHUB_STEP_SUMMARY
+          cat ${{ inputs.working_directory }}/fmt_diff.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Working Directory: \`${{ inputs.working_directory }}\`" >> $GITHUB_STEP_SUMMARY

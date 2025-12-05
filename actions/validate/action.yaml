@@ -28,5 +28,41 @@ runs:
     - name: Terraform Validate
       shell: bash
       run: |
+        VALIDATE_FILE="${{ github.workspace }}/validate.txt"
         cd ${{ inputs.working-directory }}
-        terraform validate
+
+        terraform validate 2>&1 | tee "$VALIDATE_FILE"
+
+        if [ -s "$VALIDATE_FILE" ]; then
+          echo "Validate_Outcome=failed" >> $GITHUB_ENV
+        else
+          echo "Validate_Outcome=success" >> $GITHUB_ENV
+        fi
+
+    # Generate summary for PR/Actions UI
+    - name: Generate Validate Summary
+      if: always()
+      shell: bash
+      run: |
+        VALIDATE_FILE="${{ github.workspace }}/validate.txt"
+        echo "## Terraform Validate Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ "$Validate_Outcome" == "success" ]; then
+          echo "✅ **Status:** Passed - No validation issues detected" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Status:** Failed - Validation issues detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>Click to expand for errors and warnings</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```warnings' >> $GITHUB_STEP_SUMMARY
+          cat "$VALIDATE_FILE" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Working Directory: \`${{ inputs.working_directory }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Terraform Version: \`${{ inputs.terraform_version }}\`" >> $GITHUB_STEP_SUMMARY

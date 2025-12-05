@@ -58,6 +58,14 @@ runs:
         fi
 
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
-        echo "- Working Directory: \`${{ inputs.working_directory }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- Terraform Version: \`${{ inputs.terraform_version }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Working Directory | \`${{ inputs.working-directory }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Terraform Version | \`${{ inputs.terraform-version }}\` |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY

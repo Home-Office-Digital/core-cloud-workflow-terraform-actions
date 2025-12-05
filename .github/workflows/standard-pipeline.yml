@@ -31,6 +31,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
 
       - name: Terraform Validate
+        if: success() || failure()
         uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/validate@main
         with:
           working-directory: ${{ inputs.working-directory }}

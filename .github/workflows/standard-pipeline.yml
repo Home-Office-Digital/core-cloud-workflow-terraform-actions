@@ -41,3 +41,16 @@ jobs:
       - name: TFLint
         if: success() || failure()
         uses: UKHomeOffice/core-cloud-workflow-tflint-scan@update-summary
+
+      - name: Terraform Plan
+        id: plan
+        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/plan@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          terraform-version: ${{ inputs.terraform-version }}
+          github-environment: ${{ inputs.github-environment }}
+          aws-region: ${{ inputs.aws-region }}
+          state-bucket: ${{ inputs.state-bucket }}
+          state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
+          role-to-assume: ${{ inputs.role-to-assume }}
+        secrets: inherit

@@ -4,14 +4,35 @@ on:
   workflow_call:
     inputs:
       working-directory:
-        description: 'Directory where terraform is initialised'
+        description: 'Directory containing main.tf'
         required: false
         default: '.'
         type: string
       terraform-version:
-        description: "Terraform version to use"
+        description: 'Terraform version to use'
         required: false
-        default: "~1.7.0"
+        default: '~1.7.0'
+      github-environment:
+        description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
+        required: false
+        default: 'placeholder'
+        type: string
+      aws-region:
+        description: 'AWS Region for the State Bucket and Resources'
+        default: eu-west-2
+        required: false
+        type: string
+      state-bucket:
+        description: 'Name of the S3 bucket for Terraform State'
+        required: true
+        type: string
+      state-dynamodb-table:
+        description: 'Name of the DynamoDB table'
+        required: true
+        type: string
+      role-to-assume:
+        description: 'AWS Role name for OIDC'
+        required: true
         type: string
 
 jobs:

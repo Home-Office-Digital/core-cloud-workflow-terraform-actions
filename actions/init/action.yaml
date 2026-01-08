@@ -102,5 +102,6 @@ runs:
       with:
         name: terraform-init-files
         path: |
-          .terraform/
+          .terraform/**
           .terraform.lock.hcl
+        include-hidden-files: true

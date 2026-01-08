@@ -36,13 +36,18 @@ runs:
         retry-max-attempts: 5
         aws-region: ${{ inputs.aws-region }}
 
-    - name: Cache Terraform
-      uses: actions/cache@v4
+    - name: Download Terraform Folders
+      uses: actions/download-artifact@v4
       with:
-        path: .terraform
-        key: ${{ runner.os }}-terraform-${{ hashFiles('**/.terraform.lock.hcl') }}
-        restore-keys: |
-          ${{ runner.os }}-terraform-
+        name: terraform-files
+
+    - name: Fix Binary Permissions
+      shell: bash
+      # This restores the +x bit that artifacts strip away
+      run: |
+        if [ -d ".terraform/providers" ]; then
+          find .terraform/providers -type f -exec chmod +x {} \;
+        fi
 
     - name: Terraform Plan
       shell: bash

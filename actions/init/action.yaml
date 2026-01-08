@@ -96,3 +96,11 @@ runs:
           -backend-config="region=${{ inputs.aws-region }}" \
           -backend-config="dynamodb_table=${{ inputs.state-dynamodb-table }}" \
           -input=false
+
+    - name: Share Terraform State
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-init-files
+        path: |
+          .terraform/
+          .terraform.lock.hcl

@@ -36,6 +36,11 @@ runs:
         retry-max-attempts: 5
         aws-region: ${{ inputs.aws-region }}
 
+    - name: Download Init Files
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-init-files
+
     - name: Terraform Plan
       shell: bash
       run: terraform plan -no-color -input=false

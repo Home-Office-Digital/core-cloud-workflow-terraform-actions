@@ -35,11 +35,20 @@ on:
         description: 'AWS Role name for OIDC'
         required: true
         type: string
+    secrets:
+      account_id:
+        required: true
 
 jobs:
   quality-checks:
     name: "Quality & Security"
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
     outputs:
       result: ${{ steps.quality-checks.outcome }}
     steps:
@@ -68,6 +77,7 @@ jobs:
         id: plan
         uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
+          account_id: ${{ secrets.ACCOUNT_ID }}
           working-directory: ${{ inputs.working-directory }}
           terraform-version: ${{ inputs.terraform-version }}
           github-environment: ${{ inputs.github-environment }}

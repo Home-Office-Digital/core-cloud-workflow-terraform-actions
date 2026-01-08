@@ -34,9 +34,8 @@ inputs:
     description: 'AWS Role name for OIDC'
     required: true
     type: string
-
-secrets:
   account_id:
+    description: "AWS Account ID"
     required: true
 
 runs:
@@ -48,7 +47,7 @@ runs:
     - uses: aws-actions/configure-aws-credentials@v4
       name: Configure AWS IdP Credentials
       with:
-        role-to-assume: arn:aws:iam::${{ secrets.account_id }}:role/${{ inputs.role-to-assume }}
+        role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
         role-session-name: GitHubActions
         retry-max-attempts: 5
         aws-region: ${{ inputs.aws-region }}
@@ -90,6 +89,6 @@ runs:
         terraform_version: ${{ inputs.terraform-version }}
 
     - name: Terraform Plan
-      id: plan
+      shell: bash
       run: terraform plan -no-color -input=false
       continue-on-error: true

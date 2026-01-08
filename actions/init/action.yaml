@@ -86,6 +86,12 @@ runs:
            echo "DynamoDB Table created."
         fi
 
+    - name: Cache Terraform
+      uses: actions/cache@v4
+      with:
+        path: .terraform
+        key: ${{ runner.os }}-terraform-${{ hashFiles('**/.terraform.lock.hcl') }}
+
     - name: Terraform Init
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -96,12 +102,3 @@ runs:
           -backend-config="region=${{ inputs.aws-region }}" \
           -backend-config="dynamodb_table=${{ inputs.state-dynamodb-table }}" \
           -input=false
-
-    - name: Share Terraform State
-      uses: actions/upload-artifact@v4
-      with:
-        name: terraform-init-files
-        path: |
-          .terraform/**
-          .terraform.lock.hcl
-        include-hidden-files: true

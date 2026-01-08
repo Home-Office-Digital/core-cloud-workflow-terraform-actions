@@ -36,10 +36,11 @@ runs:
         retry-max-attempts: 5
         aws-region: ${{ inputs.aws-region }}
 
-    - name: Download Init Files
-      uses: actions/download-artifact@v4
+    - name: Restore Cache
+      uses: actions/cache@v4
       with:
-        name: terraform-init-files
+        path: .terraform
+        key: ${{ runner.os }}-terraform-${{ hashFiles('**/.terraform.lock.hcl') }}
 
     - name: Terraform Plan
       shell: bash

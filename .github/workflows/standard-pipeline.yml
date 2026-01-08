@@ -12,6 +12,7 @@ on:
         description: 'Terraform version to use'
         required: false
         default: '~1.7.0'
+        type: string
       github-environment:
         description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
         required: false

@@ -75,4 +75,3 @@ jobs:
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
           role-to-assume: ${{ inputs.role-to-assume }}
-        secrets: inherit

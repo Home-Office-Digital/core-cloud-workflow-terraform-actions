@@ -56,6 +56,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Terraform Init
+        id: init
+        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/init@main
+        with:
+          account_id: ${{ secrets.ACCOUNT_ID }}
+          working-directory: ${{ inputs.working-directory }}
+          terraform-version: ${{ inputs.terraform-version }}
+          github-environment: ${{ inputs.github-environment }}
+          aws-region: ${{ inputs.aws-region }}
+          state-bucket: ${{ inputs.state-bucket }}
+          state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
+          role-to-assume: ${{ inputs.role-to-assume }}
+
       - name: Terraform Fmt
         id: quality-checks
         uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/fmt@main
@@ -73,19 +86,6 @@ jobs:
       - name: TFLint
         if: success() || failure()
         uses: UKHomeOffice/core-cloud-workflow-tflint-scan@main
-
-      - name: Terraform Init
-        id: init
-        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/init@main
-        with:
-          account_id: ${{ secrets.ACCOUNT_ID }}
-          working-directory: ${{ inputs.working-directory }}
-          terraform-version: ${{ inputs.terraform-version }}
-          github-environment: ${{ inputs.github-environment }}
-          aws-region: ${{ inputs.aws-region }}
-          state-bucket: ${{ inputs.state-bucket }}
-          state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
-          role-to-assume: ${{ inputs.role-to-assume }}
 
       - name: Terraform Plan
         id: plan

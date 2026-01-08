@@ -90,7 +90,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: .terraform
-        key: ${{ runner.os }}-terraform-${{ github.sha }}
+        key: ${{ runner.os }}-terraform-${{ hashFiles('**/.terraform.lock.hcl') }}
         restore-keys: |
           ${{ runner.os }}-terraform-
 

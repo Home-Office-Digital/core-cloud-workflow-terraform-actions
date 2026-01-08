@@ -20,12 +20,13 @@ runs:
         terraform_version: ${{ inputs.terraform-version }}
 
     # If you want to run terraform validate on its own, you'll need terraform init, hence this conditional logic.
-    - name: Restore Cache
+    - name: Cache Terraform
       uses: actions/cache@v4
-      id: terraform-cache
       with:
         path: .terraform
         key: ${{ runner.os }}-terraform-${{ hashFiles('**/.terraform.lock.hcl') }}
+        restore-keys: |
+          ${{ runner.os }}-terraform-
 
     - name: Conditional Init
       if: steps.terraform-cache.outputs.cache-hit != 'true'

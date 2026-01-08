@@ -2,11 +2,6 @@ name: "Terraform Plan"
 description: "Run Terraform plan and bootstrap S3 bucket and DynamoDB if they don't exist"
 
 inputs:
-  working-directory:
-    description: 'Directory containing main.tf'
-    required: false
-    default: '.'
-    type: string
   terraform-version:
     description: 'Terraform version to use'
     required: false
@@ -22,14 +17,6 @@ inputs:
     default: eu-west-2
     required: false
     type: string
-  state-bucket:
-    description: 'Name of the S3 bucket for Terraform State'
-    required: true
-    type: string
-  state-dynamodb-table:
-    description: 'Name of the DynamoDB table'
-    required: true
-    type: string
   role-to-assume:
     description: 'AWS Role name for OIDC'
     required: true
@@ -41,9 +28,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
     - uses: aws-actions/configure-aws-credentials@v4
       name: Configure AWS IdP Credentials
       with:
@@ -51,42 +35,6 @@ runs:
         role-session-name: GitHubActions
         retry-max-attempts: 5
         aws-region: ${{ inputs.aws-region }}
-
-    - name: Bootstrap Terraform Backend
-      id: bootstrap
-      shell: bash
-      env:
-        BUCKET: ${{ inputs.state-bucket }}
-        TABLE: ${{ inputs.state-dynamodb-table }}
-        REGION: ${{ inputs.aws-region }}
-      run: |
-        echo "Does S3 bucket and DynamoDB table exist?"
-
-        if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
-          echo "S3 Bucket $BUCKET exists."
-        else
-          echo "S3 Bucket $BUCKET not found. Creating..."
-          aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" --create-bucket-configuration LocationConstraint="$REGION"
-          aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled --region $REGION
-          echo "S3 Bucket created and versioning enabled."
-        fi
-
-        if aws dynamodb describe-table --table-name "$TABLE" --region "$REGION" >/dev/null 2>&1; then
-           echo "DynamoDB Table $TABLE exists."
-        else
-           echo "DynamoDB Table $TABLE not found. Creating..."
-           aws dynamodb create-table \
-            --table-name "$TABLE" \
-            --attribute-definitions AttributeName=LockID,AttributeType=S \
-            --key-schema AttributeName=LockID,KeyType=HASH \
-            --billing-mode PAY_PER_REQUEST --region "$REGION"
-           echo "DynamoDB Table created."
-        fi
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: ${{ inputs.terraform-version }}
 
     - name: Terraform Plan
       shell: bash

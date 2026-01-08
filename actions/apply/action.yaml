@@ -37,9 +37,9 @@ runs:
         aws-region: ${{ inputs.aws-region }}
 
     - name: Download Plan Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-plan-file
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-plan-file
 
     - name: Fix Binary Permissions
       shell: bash

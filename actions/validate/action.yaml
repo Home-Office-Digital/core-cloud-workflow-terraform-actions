@@ -20,18 +20,29 @@ runs:
         terraform_version: ${{ inputs.terraform-version }}
 
     # If you want to run terraform validate on its own, you'll need terraform init, hence this conditional logic.
-    - name: Cache Terraform
-      uses: actions/cache@v4
+    - name: Download Terraform Folders
+      uses: actions/download-artifact@v4
       with:
-        path: .terraform
-        key: ${{ runner.os }}-terraform-${{ hashFiles('**/.terraform.lock.hcl') }}
-        restore-keys: |
-          ${{ runner.os }}-terraform-
+        name: terraform-files
+
+    - name: Fix Binary Permissions
+      shell: bash
+      # This restores the +x bit that artifacts strip away
+      run: |
+        if [ -d ".terraform/providers" ]; then
+          find .terraform/providers -type f -exec chmod +x {} \;
+        fi
 
     - name: Conditional Init
-      if: steps.terraform-cache.outputs.cache-hit != 'true'
       shell: bash
-      run: terraform init -backend=false -input=false
+      # Only run init if the .terraform directory is missing (artifact download failed or was skipped)
+      run: |
+        if [ ! -d ".terraform" ]; then
+          echo "No initialized environment found. Running lightweight init..."
+          terraform init -backend=false -input=false
+        else
+          echo "Initialized environment found via artifact. Skipping init."
+        fi
 
     - name: Terraform Validate
       shell: bash

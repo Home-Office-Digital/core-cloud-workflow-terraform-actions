@@ -95,3 +95,12 @@ jobs:
           github-environment: ${{ inputs.github-environment }}
           aws-region: ${{ inputs.aws-region }}
           role-to-assume: ${{ inputs.role-to-assume }}
+
+      - name: Terraform Apply
+        id: apply
+        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/apply@main
+        with:
+          account_id: ${{ secrets.ACCOUNT_ID }}
+          github-environment: ${{ inputs.github-environment }}
+          aws-region: ${{ inputs.aws-region }}
+          role-to-assume: ${{ inputs.role-to-assume }}

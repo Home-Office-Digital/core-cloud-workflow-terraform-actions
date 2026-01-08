@@ -1,5 +1,5 @@
-name: "Terraform Plan"
-description: "Run Terraform plan and bootstrap S3 bucket and DynamoDB if they don't exist"
+name: "Terraform Apply"
+description: "Downloads the plan file arifacts and applies them"
 
 inputs:
   terraform-version:
@@ -36,26 +36,18 @@ runs:
         retry-max-attempts: 5
         aws-region: ${{ inputs.aws-region }}
 
-    - name: Download Terraform Folders
-      uses: actions/download-artifact@v4
-      with:
-        name: terraform-files
+    - name: Download Plan Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-file
 
     - name: Fix Binary Permissions
       shell: bash
-      # This restores the +x bit that artifacts strip away
       run: |
         if [ -d ".terraform/providers" ]; then
           find .terraform/providers -type f -exec chmod +x {} \;
         fi
 
-    - name: Terraform Plan
+    - name: Terraform Apply
       shell: bash
-      run: terraform plan -no-color -input=false -out=tfplan
-
-    - name: Upload Plan Binary
-      uses: actions/upload-artifact@v4
-      with:
-        name: terraform-plan-file
-        path: tfplan
-        retention-days: 1
+      run: terraform apply -input=false -no-color tfplan

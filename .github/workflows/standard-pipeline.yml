@@ -43,6 +43,7 @@ jobs:
   quality-checks:
     name: "Quality & Security"
     runs-on: ubuntu-latest
+    environment: ${{ inputs.github-environment }}
 
     permissions:
       contents: read

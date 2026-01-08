@@ -19,11 +19,21 @@ runs:
       with:
         terraform_version: ${{ inputs.terraform-version }}
 
-    - name: Terraform Init
+    # If you want to run terraform validate on its own, you'll need terraform init, hence this conditional logic.
+    - name: Check if Terraform is initialized
+      id: check-init
       shell: bash
       run: |
-        cd ${{ inputs.working-directory }}
-        terraform init -backend=false
+        if [ -d ".terraform" ]; then
+          echo "already_initialized=true" >> $GITHUB_OUTPUT
+        else
+          echo "already_initialized=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Conditional Lightweight Init
+      if: steps.check-init.outputs.already_initialized == 'false'
+      shell: bash
+      run: terraform init -backend=false -input=false
 
     - name: Terraform Validate
       shell: bash

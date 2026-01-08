@@ -62,7 +62,7 @@ jobs:
 # TODO: TFLint is not part of the official terraform CLI and is more complex. Suggest keeping that in separate repo and pointing to it here, with the ability to disable
       - name: TFLint
         if: success() || failure()
-        uses: UKHomeOffice/core-cloud-workflow-tflint-scan@update-summary
+        uses: UKHomeOffice/core-cloud-workflow-tflint-scan@main
 
       - name: Terraform Plan
         id: plan

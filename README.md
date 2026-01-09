@@ -19,6 +19,9 @@ NOTE: - As `terraform lint` is not part of the official Terraform CLI, its compo
 ## Features
 - If absent, the `terraform init` fragment will bootstrap your defined state bucket and DynamoDB table.
 - A customised Github Actions summary page that provides at-a-glance debugging features and current configuration used without needing to delve into the steps or files.
+
+<img width="1387" height="1977" alt="Screenshot 2026-01-09 at 12 16 55" src="https://github.com/user-attachments/assets/6fe24d46-eef5-4002-aba9-8e9e46ba5f4b" />
+  
 - By design, restricts `terraform apply` fragments to the `main` branch.
 
 ## Usage of complete workflow file

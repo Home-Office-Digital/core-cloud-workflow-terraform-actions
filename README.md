@@ -13,8 +13,8 @@ and a complete [Terraform workflow file](https://github.com/UKHomeOffice/core-cl
 NOTE: - As `terraform lint` is not part of the official Terraform CLI, its composite action can be found [here](https://github.com/UKHomeOffice/core-cloud-workflow-tflint-scan/blob/main/action.yaml) but is included in the complete workflow file within this repo.
 
 ## Pre-requisites
-1: Create a Github Environment
-2: Create a Github Environment secret called ACCOUNT_ID and add the AWS Account ID to it.
+1. Create a Github Environment.
+2. Create a Github Environment secret called ACCOUNT_ID and add the AWS Account ID to it.
 
 ## Features
 - If absent, the `terraform init` fragment will bootstrap your defined state bucket and DynamoDB table.

@@ -50,4 +50,4 @@ runs:
 
     - name: Terraform Apply
       shell: bash
-      run: terraform apply -input=false -no-color tfplan
+      run: terraform apply -input=false tfplan

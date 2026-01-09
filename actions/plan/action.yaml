@@ -51,7 +51,7 @@ runs:
 
     - name: Terraform Plan
       shell: bash
-      run: terraform plan -no-color -input=false -out=tfplan
+      run: terraform plan -input=false -out=tfplan
 
     - name: Upload Plan Binary
       uses: actions/upload-artifact@v4

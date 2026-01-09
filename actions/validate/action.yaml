@@ -22,6 +22,7 @@ runs:
     # If you want to run terraform validate on its own, you'll need terraform init, hence this conditional logic.
     - name: Download Terraform Folders
       uses: actions/download-artifact@v4
+      continue-on-error: true
       with:
         name: terraform-files
 
@@ -38,7 +39,6 @@ runs:
       # Only run init if the .terraform directory is missing (artifact download failed or was skipped)
       run: |
         if [ ! -d ".terraform" ]; then
-          echo "No initialized environment found. Running lightweight init..."
           terraform init -backend=false -input=false
         else
           echo "Initialized environment found via artifact. Skipping init."
@@ -51,7 +51,7 @@ runs:
         VALIDATE_FILE="${{ github.workspace }}/validate.txt"
         cd ${{ inputs.working-directory }}
 
-        terraform validate -no-color 2>&1 | tee "$VALIDATE_FILE"
+        terraform validate 2>&1 | tee "$VALIDATE_FILE"
         EXIT_CODE=$?
 
         if [ $EXIT_CODE -eq 0 ]; then

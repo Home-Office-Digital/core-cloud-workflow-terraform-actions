@@ -98,7 +98,7 @@ jobs:
 
       - name: Terraform Apply
         id: apply
-        if: github.ref_name == 'main'
+        #if: github.ref_name == 'main'
         uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/apply@main
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}

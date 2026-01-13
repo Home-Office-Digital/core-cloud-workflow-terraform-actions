@@ -29,8 +29,9 @@ on:
         type: string
       state-dynamodb-table:
         description: 'Name of the DynamoDB table'
-        required: true
+        required: false
         type: string
+        default: ''
       role-to-assume:
         description: 'AWS Role name for OIDC'
         required: true

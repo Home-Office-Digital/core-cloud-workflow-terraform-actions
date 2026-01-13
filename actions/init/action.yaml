@@ -28,7 +28,7 @@ inputs:
     type: string
   state-key:
     description: "Where you want the state key to be"
-    required: true
+    required: false
     type: string
     default: 'terraform.tfstate'
   state-dynamodb-table:

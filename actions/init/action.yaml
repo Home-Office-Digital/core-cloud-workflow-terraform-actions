@@ -26,6 +26,11 @@ inputs:
     description: 'Name of the S3 bucket for Terraform State'
     required: true
     type: string
+  state-key:
+    description: "Where you want the state key to be"
+    required: true
+    type: string
+    default: 'terraform.tfstate'
   state-dynamodb-table:
     description: 'Name of the DynamoDB table'
     required: false
@@ -96,7 +101,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         INIT_OPTS="-backend-config='bucket=${{ inputs.state-bucket }}' \
-                   -backend-config='key=terraform.tfstate' \
+                   -backend-config='key=${{ inputs.state-key }}' \
                    -backend-config='region=${{ inputs.aws-region }}' \
                    -input=false"
 

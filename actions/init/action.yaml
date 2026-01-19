@@ -2,47 +2,47 @@ name: "Terraform Init"
 description: "Run Terraform init to initialise your terraform code"
 
 inputs:
-  working-directory:
-    description: 'Directory containing main.tf'
-    required: false
-    default: '.'
-    type: string
-  terraform-version:
-    description: 'Terraform version to use'
-    required: false
-    default: '~1.7.0'
+  account_id:
+    description: "AWS Account ID"
+    required: true
+  aws-region:
+    description: 'AWS Region for the State Bucket and Resources'
+    default: eu-west-2
+    required: true
     type: string
   github-environment:
     description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
     required: false
     default: 'placeholder'
     type: string
-  aws-region:
-    description: 'AWS Region for the State Bucket and Resources'
-    default: eu-west-2
+  role-to-assume:
+    description: 'AWS Role name for OIDC'
     required: true
     type: string
   state-bucket:
     description: 'Name of the S3 bucket for Terraform State'
     required: true
     type: string
-  state-key:
-    description: "Where you want the state key to be"
-    required: false
-    type: string
-    default: 'terraform.tfstate'
   state-dynamodb-table:
     description: 'Name of the DynamoDB table'
     required: false
     default: ''
     type: string
-  role-to-assume:
-    description: 'AWS Role name for OIDC'
-    required: true
+  state-key:
+    description: "Where you want the state key to be"
+    required: false
     type: string
-  account_id:
-    description: "AWS Account ID"
-    required: true
+    default: 'terraform.tfstate'
+  terraform-version:
+    description: 'Terraform version to use'
+    required: false
+    default: '~1.7.0'
+    type: string
+  working-directory:
+    description: 'Directory containing main.tf'
+    required: false
+    default: '.'
+    type: string
 
 runs:
   using: composite

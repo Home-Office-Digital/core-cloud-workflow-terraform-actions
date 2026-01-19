@@ -2,14 +2,14 @@ name: "Terraform Format"
 description: "Terraform format checks"
 
 inputs:
-  working-directory:
-    description: "Directory of the Terraform code"
-    required: false
-    default: "."
   terraform-version:
     description: "Terraform version to use"
     required: false
     default: "~1.7.0"
+  working-directory:
+    description: "Directory of the Terraform code"
+    required: false
+    default: "."
 
 runs:
   using: "composite"

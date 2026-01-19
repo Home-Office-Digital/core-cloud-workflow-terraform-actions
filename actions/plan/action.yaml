@@ -2,28 +2,28 @@ name: "Terraform Plan"
 description: "Run Terraform plan and bootstrap S3 bucket and DynamoDB if they don't exist"
 
 inputs:
-  terraform-version:
-    description: 'Terraform version to use'
+  account_id:
+    description: "AWS Account ID"
+    required: true
+  aws-region:
+    description: 'AWS Region for the State Bucket and Resources'
+    default: eu-west-2
     required: false
-    default: '~1.7.0'
     type: string
   github-environment:
     description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
     required: false
     default: 'placeholder'
     type: string
-  aws-region:
-    description: 'AWS Region for the State Bucket and Resources'
-    default: eu-west-2
-    required: false
-    type: string
   role-to-assume:
     description: 'AWS Role name for OIDC'
     required: true
     type: string
-  account_id:
-    description: "AWS Account ID"
-    required: true
+  terraform-version:
+    description: 'Terraform version to use'
+    required: false
+    default: '~1.7.0'
+    type: string
 
 runs:
   using: composite
@@ -31,10 +31,10 @@ runs:
     - uses: aws-actions/configure-aws-credentials@v4
       name: Configure AWS IdP Credentials
       with:
-        role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
-        role-session-name: GitHubActions
-        retry-max-attempts: 5
         aws-region: ${{ inputs.aws-region }}
+        retry-max-attempts: 5
+        role-session-name: GitHubActions
+        role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
 
     - name: Download Terraform Folders
       uses: actions/download-artifact@v4

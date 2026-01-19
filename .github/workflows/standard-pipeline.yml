@@ -6,7 +6,7 @@ on:
       aws-region:
         description: 'AWS Region for the State Bucket and Resources'
         default: eu-west-2
-        required: true
+        required: false
         type: string
       github-environment:
         description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
@@ -44,6 +44,11 @@ on:
     secrets:
       account_id:
         required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
 
 jobs:
   quality-checks:

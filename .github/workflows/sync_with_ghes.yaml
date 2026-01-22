@@ -1,0 +1,31 @@
+name: Sync with GHES Instance
+
+on:
+  push:
+    tags:
+      - '*'
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  sync-live-ops-tooling:
+    name: Sync to live-ops-tooling GHES instance
+    uses: UKHomeOffice/core-cloud-workflows-actions-sync/.github/workflows/sync_hub.yaml@1.1.0
+    with:
+      ghes-instance-url: 'https://github.cc-live-ops-tooling.core.homeoffice.gov.uk'
+      ghes-owner: 'home-office-sandbox'
+      environment: 'live-ops-tooling'
+      runner: 'cc-ghec-actions-runner-live'
+    secrets: inherit
+  sync-test-ops-tooling:
+    name: Sync to test-ops-tooling GHES instance
+    uses: UKHomeOffice/core-cloud-workflows-actions-sync/.github/workflows/sync_hub.yaml@1.1.0
+    with:
+      ghes-instance-url: 'https://github.cc-test-ops-tooling.np.core.homeoffice.gov.uk'
+      ghes-owner: 'Home-Office-Test'
+      environment: 'test-ops-tooling'
+      runner: 'cc-ghec-actions-runner-test'
+    secrets: inherit

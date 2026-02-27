@@ -36,6 +36,9 @@ on:
         required: false
         default: '~1.7.0'
         type: string
+      tfvars-file:
+        required: false
+        type: string
       working-directory:
         description: 'Directory containing main.tf'
         required: false

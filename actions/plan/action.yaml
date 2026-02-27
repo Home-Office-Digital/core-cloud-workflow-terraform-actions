@@ -19,6 +19,10 @@ inputs:
     description: 'AWS Role name for OIDC'
     required: true
     type: string
+  tfvars-file:
+    required: false
+    type: string
+    default: ''
   terraform-version:
     description: 'Terraform version to use'
     required: false
@@ -51,7 +55,12 @@ runs:
 
     - name: Terraform Plan
       shell: bash
-      run: terraform plan -input=false -out=tfplan
+      run: |
+        if [ -n "${{ inputs.tfvars-file }}" ];
+          terraform plan -var-file="${{ inputs.tfvars-file }}" -out=tfplan
+        else
+          terraform plan -input=false -out=tfplan
+        fi
 
     - name: Upload Plan Binary
       uses: actions/upload-artifact@v4

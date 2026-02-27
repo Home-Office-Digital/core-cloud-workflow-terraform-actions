@@ -5,6 +5,13 @@ inputs:
   account_id:
     description: "AWS Account ID"
     required: true
+  artifact-paths:
+    description: 'Files and directories to upload as an artifact'
+    required: false
+    type: string
+    default: |
+      .terraform/
+      .terraform.lock.hcl
   aws-region:
     description: 'AWS Region for the State Bucket and Resources'
     default: eu-west-2
@@ -111,12 +118,15 @@ runs:
 
         eval terraform init $INIT_OPTS
 
+    - name: Debug
+      shell: bash
+      run: tree -a .
+
     - name: Upload Terraform Folders
       uses: actions/upload-artifact@v4
       with:
         name: terraform-files
         path: |
-          .terraform/
-          .terraform.lock.hcl
+          ${{ inputs.artifact-paths }}
         include-hidden-files: true
         if-no-files-found: error

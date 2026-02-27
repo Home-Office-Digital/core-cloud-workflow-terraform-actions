@@ -3,6 +3,13 @@ name: Standard Terraform Pipeline
 on:
   workflow_call:
     inputs:
+      artifact-paths:
+        description: 'Files and directories to upload as an artifact'
+        required: false
+        type: string
+        default: |
+          .terraform/
+          .terraform.lock.hcl
       aws-region:
         description: 'AWS Region for the State Bucket and Resources'
         default: eu-west-2
@@ -73,9 +80,10 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/init@main
+        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/init@CCL-7144
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
+          artifact-paths: ${{ inputs.artifact-paths }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ inputs.role-to-assume }}
@@ -105,12 +113,13 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/plan@main
+        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/plan@CCL-7144
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ inputs.role-to-assume }}
+          tf-vars: ${{ inputs.tf-vars }}
 
       - name: Terraform Apply
         id: apply

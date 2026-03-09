@@ -36,6 +36,10 @@ on:
         required: false
         default: '~1.7.0'
         type: string
+      tfvars-file:
+        required: false
+        type: string
+        default: ''
       working-directory:
         description: 'Directory containing main.tf'
         required: false
@@ -51,8 +55,8 @@ permissions:
   id-token: write
 
 jobs:
-  quality-checks:
-    name: "Quality & Security"
+  terraform-standardised-pipeline:
+    name: "Terraform Standardised Pipeline"
     runs-on: ubuntu-latest
     environment: ${{ inputs.github-environment }}
 
@@ -107,6 +111,8 @@ jobs:
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ inputs.role-to-assume }}
+          tfvars-file: ${{ inputs.tfvars-file }}
+          working-directory: ${{ inputs.working-directory }}
 
       - name: Terraform Apply
         id: apply

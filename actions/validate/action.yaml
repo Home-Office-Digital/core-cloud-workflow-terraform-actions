@@ -19,21 +19,6 @@ runs:
       with:
         terraform_version: ${{ inputs.terraform-version }}
 
-    # If you want to run terraform validate on its own, you'll need terraform init, hence this conditional logic.
-    - name: Download Terraform Folders
-      uses: actions/download-artifact@v4
-      continue-on-error: true
-      with:
-        name: terraform-files
-
-    - name: Fix Binary Permissions
-      shell: bash
-      # This restores the +x bit that artifacts strip away
-      run: |
-        if [ -d ".terraform/providers" ]; then
-          find .terraform/providers -type f -exec chmod +x {} \;
-        fi
-
     - name: Conditional Init
       shell: bash
       # Only run init if the .terraform directory is missing (artifact download failed or was skipped)

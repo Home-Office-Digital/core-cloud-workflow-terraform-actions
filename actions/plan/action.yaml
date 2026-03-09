@@ -24,6 +24,15 @@ inputs:
     required: false
     default: '~1.7.0'
     type: string
+  tfvars-file:
+    required: false
+    type: string
+    default: ''
+  working-directory:
+    description: 'Directory containing main.tf'
+    required: false
+    default: '.'
+    type: string
 
 runs:
   using: composite
@@ -36,26 +45,19 @@ runs:
         role-session-name: GitHubActions
         role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
 
-    - name: Download Terraform Folders
-      uses: actions/download-artifact@v4
-      with:
-        name: terraform-files
-
-    - name: Fix Binary Permissions
-      shell: bash
-      # This restores the +x bit that artifacts strip away
-      run: |
-        if [ -d ".terraform/providers" ]; then
-          find .terraform/providers -type f -exec chmod +x {} \;
-        fi
-
     - name: Terraform Plan
       shell: bash
-      run: terraform plan -input=false -out=tfplan
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -n "${{ inputs.tfvars-file }}" ]; then
+          terraform plan -input=false -var-file="${{ inputs.tfvars-file }}" -out=tfplan
+        else
+          terraform plan -input=false -out=tfplan
+        fi
 
     - name: Upload Plan Binary
       uses: actions/upload-artifact@v4
       with:
-        name: terraform-plan-file
-        path: tfplan
+        name: terraform-plan-file-${{ inputs.github-environment }}
+        path: ${{ inputs.working-directory }}/tfplan
         retention-days: 1

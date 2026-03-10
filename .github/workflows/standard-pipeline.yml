@@ -3,6 +3,11 @@ name: Standard Terraform Pipeline
 on:
   workflow_call:
     inputs:
+      apply-branch:
+        description: "Adds the ability to define which branch you want to be able to apply to"
+        required: false
+        default: 'main'
+        type: string
       aws-region:
         description: 'AWS Region for the State Bucket and Resources'
         default: eu-west-2
@@ -111,15 +116,19 @@ jobs:
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ inputs.role-to-assume }}
+          terraform-version: ${{ inputs.terraform-version }}
           tfvars-file: ${{ inputs.tfvars-file }}
           working-directory: ${{ inputs.working-directory }}
 
       - name: Terraform Apply
+        if: github.ref_name == inputs.apply-branch
         id: apply
-        if: github.ref_name == 'main'
         uses: UKHomeOffice/core-cloud-workflow-terraform-actions/actions/apply@main
         with:
+          apply-branch: ${{ inputs.apply-branch }}
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ inputs.role-to-assume }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ inputs.working-directory }}

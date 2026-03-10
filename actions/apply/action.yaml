@@ -5,6 +5,11 @@ inputs:
   account_id:
     description: "AWS Account ID"
     required: true
+  apply-branch:
+    description: "Adds the ability to define which branch you want to be able to apply to"
+    required: false
+    default: 'main'
+    type: string
   aws-region:
     description: 'AWS Region for the State Bucket and Resources'
     default: eu-west-2
@@ -24,10 +29,27 @@ inputs:
     required: false
     default: '~1.7.0'
     type: string
+  working-directory:
+    description: 'Directory containing main.tf'
+    required: false
+    default: '.'
+    type: string
 
 runs:
   using: composite
   steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Download Plan File
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-plan-file-${{ inputs.github-environment }}
+        path: ${{ inputs.working-directory }}
+
     - uses: aws-actions/configure-aws-credentials@v4
       name: Configure AWS IdP Credentials
       with:
@@ -36,18 +58,7 @@ runs:
         role-session-name: GitHubActions
         role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
 
-    - name: Download Plan Binary
-      uses: actions/download-artifact@v4
-      with:
-        name: terraform-plan-file-${{ inputs.github-environment }}
-
-    - name: Fix Binary Permissions
-      shell: bash
-      run: |
-        if [ -d ".terraform/providers" ]; then
-          find .terraform/providers -type f -exec chmod +x {} \;
-        fi
-
     - name: Terraform Apply
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: terraform apply -input=false tfplan

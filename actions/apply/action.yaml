@@ -39,7 +39,7 @@ runs:
     - name: Download Plan Binary
       uses: actions/download-artifact@v4
       with:
-        name: terraform-plan-file
+        name: terraform-plan-file-${{ inputs.github-environment }}
 
     - name: Fix Binary Permissions
       shell: bash

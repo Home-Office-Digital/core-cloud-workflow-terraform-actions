@@ -8,9 +8,9 @@ This repository contains composite actions for individual terraform command frag
 - `terraform plan`
 - `terraform apply`
 
-and a complete [Terraform workflow file](https://github.com/UKHomeOffice/core-cloud-workflow-terraform-actions/blob/main/.github/workflows/standard-pipeline.yml) when you just want to use a complete Terraform pipeline.
+and a complete [Terraform workflow file](https://github.com/Home-Office-Digital/core-cloud-workflow-terraform-actions/blob/main/.github/workflows/standard-pipeline.yml) when you just want to use a complete Terraform pipeline.
 
-NOTE: - As `terraform lint` is not part of the official Terraform CLI, its composite action can be found [here](https://github.com/UKHomeOffice/core-cloud-workflow-tflint-scan/blob/main/action.yaml) but is included in the complete workflow file within this repo.
+NOTE: - As `terraform lint` is not part of the official Terraform CLI, its composite action can be found [here](https://github.com/Home-Office-Digital/core-cloud-workflow-tflint-scan/blob/main/action.yaml) but is included in the complete workflow file within this repo.
 
 ## Pre-requisites
 1. Create a Github Environment.
@@ -39,7 +39,7 @@ Craete a workflow file in your `.github/workflows` directory and populate with t
           id-token: write
           contents: read
           pull-requests: write
-        uses: UKHomeOffice/core-cloud-workflow-terraform-actions/.github/workflows/standard-pipeline.yml@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/.github/workflows/standard-pipeline.yml@main
         with:
           working-directory: '.'
           github-environment: '<GITHUB_ENVIRONMENT_NAME>'
@@ -50,5 +50,5 @@ Craete a workflow file in your `.github/workflows` directory and populate with t
           account_id: ${{ secrets.ACCOUNT_ID }}
 
 ## Usage of composite actions
-Please refer to the [Terraform workflow file](https://github.com/UKHomeOffice/core-cloud-workflow-terraform-actions/blob/main/.github/workflows/standard-pipeline.yml) for examples of using composite actions.
+Please refer to the [Terraform workflow file](https://github.com/Home-Office-Digital/core-cloud-workflow-terraform-actions/blob/main/.github/workflows/standard-pipeline.yml) for examples of using composite actions.
 NOTE: Running `terraform validate` has conditional logic to initialise the terraform code, so you don't need to add the `terraform init` fragment beforehand.

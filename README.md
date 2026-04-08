@@ -46,6 +46,13 @@ Craete a workflow file in your `.github/workflows` directory and populate with t
           state-bucket: '<DESIRED_NAME_OF_S3_BUCKET_FOR_STORING_STATE_FILES>'
           state-dynamodb-table: '<DESIRED_DYNAMODB_TABLE_NAME>'
           role-to-assume: '<AWS_ROLE_THAT_HAS_PERMISSIONS_TO_CREATE_AND_DESTROY_RESOURCES>'
+          # If your Terraform config logic requires the consumption of a custom secret, the pipeline can inject up to 3 secrets. It will prefix each with TF_VAR_
+          tf_secret_name: "MY_SECRET_NAME_1"
+          tf_secret: "GITHUB_SECRET_NAME_1"
+          tf_secret_2_name: "etcetc"
+          tf_secret_2: "ETC_ETC"
+          tf_secret_3_name: "Final_secret_name"
+          tf_secret_3: "FINAL_GITHUB_SECRET"
         secrets:
           account_id: ${{ secrets.ACCOUNT_ID }}
 

@@ -78,7 +78,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feature/add-secrets
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -92,13 +92,13 @@ jobs:
 
       - name: Terraform Fmt
         id: quality-checks
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@feature/add-secrets
         with:
           working-directory: ${{ inputs.working-directory }}
 
       - name: Terraform Validate
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@feature/add-secrets
         with:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -110,7 +110,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@feature/add-secrets
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -123,7 +123,7 @@ jobs:
       - name: Terraform Apply
         if: github.ref_name == inputs.apply-branch
         id: apply
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@feature/add-secrets
         with:
           apply-branch: ${{ inputs.apply-branch }}
           account_id: ${{ secrets.ACCOUNT_ID }}

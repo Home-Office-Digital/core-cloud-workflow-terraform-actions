@@ -41,6 +41,36 @@ on:
         required: false
         default: '~1.7.0'
         type: string
+      tf_secret_name:
+        description: 'Terraform variable name to set via TF_VAR_ from AWS Secrets Manager'
+        required: false
+        default: ''
+        type: string
+      tf_secret_id:
+        description: 'AWS Secrets Manager secret ID to inject as TF_VAR_{tf_secret_name}'
+        required: false
+        default: ''
+        type: string
+      tf_secret_2_name:
+        description: 'Second Terraform variable name to set via TF_VAR_ from AWS Secrets Manager'
+        required: false
+        default: ''
+        type: string
+      tf_secret_2_id:
+        description: 'AWS Secrets Manager secret ID to inject as TF_VAR_{tf_secret_2_name}'
+        required: false
+        default: ''
+        type: string
+      tf_secret_3_name:
+        description: 'Third Terraform variable name to set via TF_VAR_ from AWS Secrets Manager'
+        required: false
+        default: ''
+        type: string
+      tf_secret_3_id:
+        description: 'AWS Secrets Manager secret ID to inject as TF_VAR_{tf_secret_3_name}'
+        required: false
+        default: ''
+        type: string
       tfvars-file:
         required: false
         type: string
@@ -116,6 +146,12 @@ jobs:
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ inputs.role-to-assume }}
+          tf_secret_name: ${{ inputs.tf_secret_name }}
+          tf_secret_id: ${{ inputs.tf_secret_id }}
+          tf_secret_2_name: ${{ inputs.tf_secret_2_name }}
+          tf_secret_2_id: ${{ inputs.tf_secret_2_id }}
+          tf_secret_3_name: ${{ inputs.tf_secret_3_name }}
+          tf_secret_3_id: ${{ inputs.tf_secret_3_id }}
           terraform-version: ${{ inputs.terraform-version }}
           tfvars-file: ${{ inputs.tfvars-file }}
           working-directory: ${{ inputs.working-directory }}

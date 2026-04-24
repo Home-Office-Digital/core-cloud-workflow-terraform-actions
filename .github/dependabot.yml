@@ -1,5 +1,3 @@
-
----
 version: 2
 updates:
     # Enable Github Action updates
@@ -13,4 +11,3 @@ updates:
           - "dependencies"
           - "patch"
           - "actions"
-    

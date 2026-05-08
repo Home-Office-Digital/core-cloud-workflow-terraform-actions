@@ -53,6 +53,10 @@ on:
     secrets:
       account_id:
         required: true
+      sonar_host_url:
+        required: false
+      sonar_token:
+        required: false
 
 permissions:
   contents: read
@@ -107,6 +111,14 @@ jobs:
       - name: TFLint
         if: success() || failure()
         uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@main
+
+      - name: Terraform Test
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          sonar-host-url: ${{ secrets.sonar_host_url }}
+          sonar-token: ${{ secrets.sonar_token }}
 
       - name: Terraform Plan
         id: plan

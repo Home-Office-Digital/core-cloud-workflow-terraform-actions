@@ -114,8 +114,11 @@ jobs:
 
       - name: Terraform Test
         if: success() || failure()
-        working-directory: ${{ inputs.working-directory }}
-        run: terraform test
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@feature/ccl-9216-adding-terraform-test-workflow
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          sonar-host-url: ${{ secrets.sonar_host_url }}
+          sonar-token: ${{ secrets.sonar_token }}
 
       - name: Terraform Plan
         id: plan

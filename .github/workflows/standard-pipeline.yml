@@ -114,11 +114,8 @@ jobs:
 
       - name: Terraform Test
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@main
-        with:
-          working-directory: ${{ inputs.working-directory }}
-          sonar-host-url: ${{ secrets.sonar_host_url }}
-          sonar-token: ${{ secrets.sonar_token }}
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform test
 
       - name: Terraform Plan
         id: plan

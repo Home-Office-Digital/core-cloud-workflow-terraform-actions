@@ -6,53 +6,58 @@ on:
       apply-branch:
         description: "Adds the ability to define which branch you want to be able to apply to"
         required: false
-        default: 'main'
+        default: "main"
         type: string
       aws-region:
-        description: 'AWS Region for the State Bucket and Resources'
+        description: "AWS Region for the State Bucket and Resources"
         default: eu-west-2
         required: false
         type: string
       github-environment:
-        description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
+        description: "The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also."
         required: false
-        default: 'placeholder'
+        default: "placeholder"
         type: string
       role-to-assume:
-        description: 'AWS Role name for OIDC'
-        required: true
+        description: "AWS Role name for OIDC"
+        required: false
         type: string
       state-bucket:
-        description: 'Name of the S3 bucket for Terraform State'
-        required: true
+        description: "Name of the S3 bucket for Terraform State"
+        required: false
         type: string
       state-dynamodb-table:
-        description: 'Name of the DynamoDB table'
+        description: "Name of the DynamoDB table"
         required: false
-        default: ''
+        default: ""
         type: string
       state-key:
         description: "Where you want the state key to be"
         required: false
         type: string
-        default: 'terraform.tfstate'
+        default: "terraform.tfstate"
       terraform-version:
-        description: 'Terraform version to use'
+        description: "Terraform version to use"
         required: false
-        default: '~1.7.0'
+        default: "~1.7.0"
         type: string
       tfvars-file:
         required: false
         type: string
-        default: ''
-      working-directory:
-        description: 'Directory containing main.tf'
+        default: ""
+      use-backend:
+        description: "Whether to use a remote backend for Terraform state"
         required: false
-        default: '.'
+        default: true
+        type: boolean
+      working-directory:
+        description: "Directory containing main.tf"
+        required: false
+        default: "."
         type: string
     secrets:
       account_id:
-        required: true
+        required: false
       sonar_host_url:
         required: false
       sonar_token:
@@ -82,7 +87,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feature/CCL-8822-terraform-backend
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -93,6 +98,7 @@ jobs:
           state-key: ${{ inputs.state-key }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}
+          use-backend: ${{ inputs.use-backend }}
 
       - name: Terraform Fmt
         id: quality-checks
@@ -107,7 +113,7 @@ jobs:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}
 
-# TODO: TFLint is not part of the official terraform CLI and is more complex. Suggest keeping that in separate repo and pointing to it here, with the ability to disable
+      # TODO: TFLint is not part of the official terraform CLI and is more complex. Suggest keeping that in separate repo and pointing to it here, with the ability to disable
       - name: TFLint
         if: success() || failure()
         uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@main
@@ -121,6 +127,7 @@ jobs:
           sonar-token: ${{ secrets.sonar_token }}
 
       - name: Terraform Plan
+        if: ${{ inputs.use-backend == true }}
         id: plan
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
@@ -133,7 +140,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
 
       - name: Terraform Apply
-        if: github.ref_name == inputs.apply-branch
+        if: ${{ inputs.use-backend == true && github.ref_name == inputs.apply-branch }}
         id: apply
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
         with:

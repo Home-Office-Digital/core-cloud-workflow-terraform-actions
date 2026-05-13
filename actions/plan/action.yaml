@@ -24,6 +24,30 @@ inputs:
     required: false
     default: '~1.7.0'
     type: string
+  tf_secret_name:
+    description: 'Terraform variable name to set via TF_VAR_ from AWS Secrets Manager'
+    required: false
+    default: ''
+  tf_secret_id:
+    description: 'AWS Secrets Manager secret ID to inject as TF_VAR_{tf_secret_name}'
+    required: false
+    default: ''
+  tf_secret_2_name:
+    description: 'Second Terraform variable name to set via TF_VAR_ from AWS Secrets Manager'
+    required: false
+    default: ''
+  tf_secret_2_id:
+    description: 'AWS Secrets Manager secret ID to inject as TF_VAR_{tf_secret_2_name}'
+    required: false
+    default: ''
+  tf_secret_3_name:
+    description: 'Third Terraform variable name to set via TF_VAR_ from AWS Secrets Manager'
+    required: false
+    default: ''
+  tf_secret_3_id:
+    description: 'AWS Secrets Manager secret ID to inject as TF_VAR_{tf_secret_3_name}'
+    required: false
+    default: ''
   tfvars-file:
     required: false
     type: string
@@ -50,6 +74,28 @@ runs:
         retry-max-attempts: 5
         role-session-name: GitHubActions
         role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
+
+    - name: Inject Terraform variables from secrets
+      shell: bash
+      env:
+        SECRET_PAIRS: |
+          ${{ inputs.tf_secret_name }}|${{ inputs.tf_secret_id }}
+          ${{ inputs.tf_secret_2_name }}|${{ inputs.tf_secret_2_id }}
+          ${{ inputs.tf_secret_3_name }}|${{ inputs.tf_secret_3_id }}
+      run: |
+        while IFS='|' read -r var_name secret_id; do
+          [ -z "$var_name" ] && continue
+          SECRET_VALUE=$(aws secretsmanager get-secret-value \
+            --secret-id "$secret_id" \
+            --query SecretString \
+            --output text) || {
+            echo "ERROR: Failed to retrieve secret '${secret_id}'" >&2
+            exit 1
+          }
+          echo "::add-mask::${SECRET_VALUE}"
+          echo "TF_VAR_${var_name}=${SECRET_VALUE}" >> $GITHUB_ENV
+        done <<< "$SECRET_PAIRS"
+
 
     - name: Terraform Plan
       shell: bash

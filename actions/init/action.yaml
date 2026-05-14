@@ -4,44 +4,49 @@ description: "Run Terraform init to initialise your terraform code"
 inputs:
   account_id:
     description: "AWS Account ID"
-    required: true
+    required: false
   aws-region:
-    description: 'AWS Region for the State Bucket and Resources'
-    default: eu-west-2
-    required: true
+    description: "AWS Region for the State Bucket and Resources"
+    default: "eu-west-2"
+    required: false
     type: string
   github-environment:
-    description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
+    description: "The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also."
     required: false
-    default: 'placeholder'
+    default: "placeholder"
     type: string
   role-to-assume:
-    description: 'AWS Role name for OIDC'
-    required: true
+    description: "AWS Role name for OIDC"
+    required: false
     type: string
   state-bucket:
-    description: 'Name of the S3 bucket for Terraform State'
-    required: true
+    description: "Name of the S3 bucket for Terraform State"
+    required: false
     type: string
   state-dynamodb-table:
-    description: 'Name of the DynamoDB table'
+    description: "Name of the DynamoDB table"
     required: false
-    default: ''
+    default: ""
     type: string
   state-key:
     description: "Where you want the state key to be"
     required: false
     type: string
-    default: 'terraform.tfstate'
+    default: "terraform.tfstate"
   terraform-version:
-    description: 'Terraform version to use'
+    description: "Terraform version to use"
     required: false
-    default: '~1.7.0'
+    default: "~1.7.0"
     type: string
-  working-directory:
-    description: 'Directory containing main.tf'
+  use-backend:
+    description: "Whether to use a remote backend for Terraform state"
     required: false
-    default: '.'
+    default: "true"
+    type: boolean
+  working-directory:
+    description: "Directory containing main.tf"
+    required: false
+    default: "."
     type: string
 
 runs:
@@ -54,6 +59,7 @@ runs:
         terraform_wrapper: false
 
     - uses: aws-actions/configure-aws-credentials@v4
+      if: ${{ inputs.use-backend == 'true' }}
       name: Configure AWS IdP Credentials
       with:
         role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
@@ -62,6 +68,7 @@ runs:
         aws-region: ${{ inputs.aws-region }}
 
     - name: Bootstrap Terraform Backend
+      if: ${{ inputs.use-backend == 'true' }}
       id: bootstrap
       shell: bash
       env:
@@ -109,13 +116,27 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         export TF_PLUGIN_CACHE_DIR=""
-        INIT_OPTS="-backend-config='bucket=${{ inputs.state-bucket }}' \
-                   -backend-config='key=${{ inputs.state-key }}' \
-                   -backend-config='region=${{ inputs.aws-region }}' \
-                   -input=false"
 
-        if [ -n "${{ inputs.state-dynamodb-table }}" ]; then
-          INIT_OPTS="$INIT_OPTS -backend-config='dynamodb_table=${{ inputs.state-dynamodb-table }}'"
+        if [ "${{ inputs.use-backend }}" = "true" ]; then
+          echo "Running full init with backend..."
+
+          if [ -z "${{ inputs.state-bucket }}" ]; then
+            echo "state-bucket is required when use-backend=true"
+            exit 1
+          fi
+
+          INIT_OPTS="-backend-config='bucket=${{ inputs.state-bucket }}' \
+                      -backend-config='key=${{ inputs.state-key }}' \
+                      -backend-config='region=${{ inputs.aws-region }}' \
+                      -input=false"
+
+          if [ -n "${{ inputs.state-dynamodb-table }}" ]; then
+            INIT_OPTS="$INIT_OPTS -backend-config='dynamodb_table=${{ inputs.state-dynamodb-table }}'"
+          fi
+
+        else
+          echo "Running init without backend (modules and providers only)..."
+          INIT_OPTS="-backend=false -input=false"
         fi
 
         eval terraform init $INIT_OPTS

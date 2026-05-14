@@ -18,6 +18,7 @@ NOTE: - As `terraform lint` is not part of the official Terraform CLI, its compo
 
 ## Features
 - If absent, the `terraform init` fragment will bootstrap your defined state bucket and DynamoDB table.
+- Optional `use-backend` input allows `terraform init` to run with `-backend=false` for local state workflows and will not run plan/apply
 - A customised Github Actions summary page that provides at-a-glance debugging features and current configuration used without needing to delve into the steps or files.
 
 <img width="1387" height="1977" alt="Screenshot 2026-01-09 at 12 16 55" src="https://github.com/user-attachments/assets/6fe24d46-eef5-4002-aba9-8e9e46ba5f4b" />
@@ -43,6 +44,7 @@ Craete a workflow file in your `.github/workflows` directory and populate with t
         with:
           working-directory: '.'
           github-environment: '<GITHUB_ENVIRONMENT_NAME>'
+          use-backend: true
           state-bucket: '<DESIRED_NAME_OF_S3_BUCKET_FOR_STORING_STATE_FILES>'
           state-dynamodb-table: '<DESIRED_DYNAMODB_TABLE_NAME>'
           role-to-assume: '<AWS_ROLE_THAT_HAS_PERMISSIONS_TO_CREATE_AND_DESTROY_RESOURCES>'

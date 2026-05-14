@@ -87,7 +87,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feature/CCL-8822-terraform-backend
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}

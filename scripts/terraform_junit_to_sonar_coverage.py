@@ -274,6 +274,52 @@ def build_report(input_path: Path, output_path: Path) -> None:
         print(f"Overall run-block coverage: {total_covered}/{total_coverable}")
 
 
+def map_resources_to_tests(test_cases: list[tuple[str, ET.Element]]) -> dict[str, set[str]]:
+    """
+    Map Terraform resources to their corresponding test cases.
+
+    Args:
+        test_cases: A list of tuples containing test case names and their XML elements.
+
+    Returns:
+        A dictionary mapping resource names to sets of test case names.
+    """
+    resource_to_tests = defaultdict(set)
+
+    for test_name, test_case in test_cases:
+        hcl_path = resolve_tests_hcl_path(test_name)
+        if not hcl_path:
+            continue
+
+        with open(hcl_path, "r") as hcl_file:
+            for line in hcl_file:
+                match = RESOURCE_REF_PATTERN.search(line)
+                if match:
+                    resource_name = match.group(1)
+                    resource_to_tests[resource_name].add(test_name)
+
+    return resource_to_tests
+
+
+def write_coverage_report(resource_to_tests: dict[str, set[str]], output_path: str) -> None:
+    """
+    Write the SonarQube coverage report based on resource-to-test mappings.
+
+    Args:
+        resource_to_tests: A dictionary mapping resource names to sets of test case names.
+        output_path: Path to the output SonarQube coverage XML file.
+    """
+    coverage_root = ET.Element("coverage")
+
+    for resource, tests in resource_to_tests.items():
+        file_element = ET.SubElement(coverage_root, "file", path=resource)
+        for test in tests:
+            ET.SubElement(file_element, "lineToCover", lineNumber="1", covered="true")
+
+    tree = ET.ElementTree(coverage_root)
+    tree.write(output_path, encoding="utf-8", xml_declaration=True)
+
+
 def main() -> int:
     args = parse_args()
     build_report(Path(args.input), Path(args.output))

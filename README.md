@@ -5,6 +5,7 @@ This repository contains composite actions for individual terraform command frag
 - `terraform init`
 - `terraform fmt`
 - `terraform validate`
+- `terraform test` (with optional SonarQube test and coverage report conversion/scan support)
 - `terraform plan`
 - `terraform apply`
 

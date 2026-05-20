@@ -50,6 +50,12 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: python3 "${{ github.action_path }}/../../scripts/terraform_junit_to_sonar.py" --input test-results.xml --output sonar-test-results.xml
 
+    - name: Convert Terraform JUnit To SonarQube Generic Coverage Report
+      if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: python3 "${{ github.action_path }}/../../scripts/terraform_junit_to_sonar_coverage.py" --input test-results.xml --output sonar-coverage.xml
+
     - name: Validate SonarQube Test Report Contains Test Cases
       if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
       shell: bash
@@ -58,6 +64,14 @@ runs:
         test -f sonar-test-results.xml
         grep -q "<testExecutions " sonar-test-results.xml
 
+    - name: Validate SonarQube Coverage Report Contains Coverage Root
+      if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        test -f sonar-coverage.xml
+        grep -q "<coverage " sonar-coverage.xml
+
     - name: Print Generated Reports
       if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true'
       shell: bash
@@ -65,6 +79,7 @@ runs:
       run: |
         cat test-results.xml || true
         cat sonar-test-results.xml || true
+        cat sonar-coverage.xml || true
 
     - name: SonarQube Scan
       if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
@@ -72,15 +87,16 @@ runs:
       with:
         args: >
           -Dsonar.projectBaseDir=${{ inputs.working-directory }}
-          -Dsonar.exclusions=**/.terraform/**,**/test-results.xml,**/sonar-test-results.xml,**/.scannerwork/**
-          -Dsonar.sources=tests
-          -Dsonar.inclusions=tests/**
+          -Dsonar.exclusions=**/.terraform/**,**/test-results.xml,**/sonar-test-results.xml,**/sonar-coverage.xml,**/.scannerwork/**
+          -Dsonar.sources=.
+          -Dsonar.inclusions=**/*.tf,**/*.tfvars,tests/**/*.tftest.hcl
           -Dsonar.terraform.file.suffixes=.tf,.tfvars,.tftest.hcl
           -Dsonar.tests=tests
           -Dsonar.test.inclusions=tests/**/*.tftest.hcl
           -Dsonar.test.exclusions=tests/sonar_test_anchor.py
           -Dsonar.text.inclusions=tests/**/*.tftest.hcl
           -Dsonar.testExecutionReportPaths=sonar-test-results.xml
+          -Dsonar.coverageReportPaths=sonar-coverage.xml
       env:
         SONAR_TOKEN: ${{ inputs.sonar-token }}
         SONAR_HOST_URL: ${{ inputs.sonar-host-url }}

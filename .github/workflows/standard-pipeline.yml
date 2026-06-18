@@ -117,6 +117,8 @@ jobs:
       - name: TFLint
         if: success() || failure()
         uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Terraform Test
         if: success() || failure()

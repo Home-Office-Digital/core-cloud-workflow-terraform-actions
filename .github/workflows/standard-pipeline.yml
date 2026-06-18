@@ -116,7 +116,7 @@ jobs:
       # TODO: TFLint is not part of the official terraform CLI and is more complex. Suggest keeping that in separate repo and pointing to it here, with the ability to disable
       - name: TFLint
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@main
+        uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@fix/unauthenticated-tflint-requests
         env:
           GITHUB_TOKEN: ${{ github.token }}
 

@@ -38,12 +38,9 @@ def resolve_tests_hcl_path(raw_path: str) -> str | None:
     if not normalized.endswith(".tftest.hcl"):
         return None
 
-    parts = [part for part in normalized.split("/") if part]
-    if "tests" not in parts:
-        return None
-
-    idx = parts.index("tests")
-    return "/".join(parts[idx:])
+    # Keep the full project-relative path so Sonar can map coverage to any
+    # .tftest.hcl location under the current working directory.
+    return normalized.lstrip("./") or normalized
 
 
 def iter_test_cases(root: ET.Element) -> list[tuple[str, ET.Element]]:
@@ -105,11 +102,10 @@ def parse_resource_blocks(path: Path) -> list[tuple[str, int]]:
 
 def collect_resource_references_from_tests() -> set[str]:
     references: set[str] = set()
-    tests_dir = Path("tests")
-    if not tests_dir.exists():
-        return references
-
-    for test_file in sorted(tests_dir.rglob("*.tftest.hcl")):
+    for test_file in sorted(Path(".").rglob("*.tftest.hcl")):
+        test_path = test_file.as_posix()
+        if "/.terraform/" in f"/{test_path}/":
+            continue
         content = test_file.read_text(encoding="utf-8")
         references.update(RESOURCE_REF_PATTERN.findall(content))
 

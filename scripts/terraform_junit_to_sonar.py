@@ -161,12 +161,9 @@ def resolve_tests_hcl_path(raw_path: str) -> str | None:
     if not normalized.endswith(".tftest.hcl"):
         return None
 
-    parts = [part for part in normalized.split("/") if part]
-    if "tests" in parts:
-        idx = parts.index("tests")
-        return "/".join(parts[idx:])
-
-    return None
+    # Keep the full project-relative path so Sonar can match files regardless of
+    # where test files live (for example, code/configuration/tests/*.tftest.hcl).
+    return normalized.lstrip("./") or normalized
 
 
 def build_report(input_path: Path, output_path: Path) -> None:

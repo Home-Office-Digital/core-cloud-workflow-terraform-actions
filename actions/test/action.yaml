@@ -159,12 +159,12 @@ runs:
         ls -la sonar-test-results.xml sonar-coverage.xml || true
 
     - name: SonarQube Scan
-      if: always() && steps.detect_terraform_tests.outputs.has-tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
+      if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
       uses: sonarsource/sonarqube-scan-action@v7
       with:
         args: >
-          -Dsonar.projectBaseDir=${{ inputs.working-directory }}
-          -Dsonar.exclusions=**/.terraform/**,**/test-results.xml,**/sonar-test-results.xml,**/sonar-coverage.xml,**/.scannerwork/**
+          -Dsonar.projectBaseDir=${{ github.workspace }}/${{ inputs.working-directory }}
+          -Dsonar.exclusions=**/.terraform/**,**/test-results.xml,**/${{ inputs.test-directory }}/sonar-test-results.xml,**/${{ inputs.test-directory }}/sonar-coverage.xml,**/.scannerwork/**
           -Dsonar.sources=.
           -Dsonar.inclusions=**/*.tf,**/*.tfvars,tests/**/*.tftest.hcl
           -Dsonar.terraform.file.suffixes=.tf,.tfvars,.tftest.hcl
@@ -172,8 +172,8 @@ runs:
           -Dsonar.test.inclusions=tests/**/*.tftest.hcl
           -Dsonar.test.exclusions=tests/sonar_test_anchor.py
           -Dsonar.text.inclusions=tests/**/*.tftest.hcl
-          -Dsonar.testExecutionReportPaths=sonar-test-results.xml
-          -Dsonar.coverageReportPaths=sonar-coverage.xml
+          -Dsonar.testExecutionReportPaths=${{ github.workspace }}/sonar-test-results.xml,${{ github.workspace }}/${{ inputs.test-directory }}/sonar-test-results.xml
+          -Dsonar.coverageReportPaths=${{ github.workspace }}/sonar-coverage.xml,${{ github.workspace }}/${{ inputs.test-directory }}/sonar-coverage.xml
       env:
         SONAR_TOKEN: ${{ inputs.sonar-token }}
         SONAR_HOST_URL: ${{ inputs.sonar-host-url }}

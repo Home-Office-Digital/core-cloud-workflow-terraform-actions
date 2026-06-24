@@ -241,3 +241,17 @@ def build_report(input_path: Path, output_path: Path) -> None:
         print("No run blocks found for coverage mapping.")
     else:
         print(f"Overall run-block coverage: {total_covered}/{total_coverable}")
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        build_report(Path(args.input), Path(args.output))
+        return 0
+    except Exception as e:
+        print(f"Error building sonar coverage report: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

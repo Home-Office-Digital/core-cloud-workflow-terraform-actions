@@ -219,3 +219,17 @@ def build_report(input_path: Path, output_path: Path) -> None:
             print(f"  {path}: {counts_by_file[path]} tests")
     else:
         print("No tests/*.hcl testcases were found in JUnit input.")
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        build_report(Path(args.input), Path(args.output))
+        return 0
+    except Exception as e:
+        print(f"Error building sonar test report: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -26,6 +26,7 @@ outputs:
 
 runs:
   using: composite
+
   steps:
     - name: Detect Terraform Tests
       id: detect_terraform_tests
@@ -61,28 +62,43 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        # Use absolute paths so the Sonar scanner can always find the reports at repo root
         if [ -n "${{ inputs.test-directory }}" ]; then
-          IN_FILE="${{ inputs.test-directory }}/test-results.xml"
-          OUT_FILE="${{ inputs.test-directory }}/sonar-test-results.xml"
+          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.test-directory }}/test-results.xml"
+          OUT_FILE="$GITHUB_WORKSPACE/sonar-test-results.xml"
+          FALLBACK_COPY_DIR="$GITHUB_WORKSPACE/${{ inputs.test-directory }}"
         else
-          IN_FILE="test-results.xml"
-          OUT_FILE="sonar-test-results.xml"
+          IN_FILE="$GITHUB_WORKSPACE/test-results.xml"
+          OUT_FILE="$GITHUB_WORKSPACE/sonar-test-results.xml"
+          FALLBACK_COPY_DIR=""
         fi
         python3 "${{ github.action_path }}/../../scripts/terraform_junit_to_sonar.py" --input "$IN_FILE" --output "$OUT_FILE"
+        # If tests live in a subdir, also copy the generated report there for visibility
+        if [ -n "$FALLBACK_COPY_DIR" ] && [ -f "$OUT_FILE" ]; then
+          mkdir -p "$FALLBACK_COPY_DIR"
+          cp "$OUT_FILE" "$FALLBACK_COPY_DIR/sonar-test-results.xml" || true
+        fi
 
     - name: Convert Terraform JUnit To SonarQube Generic Coverage Report
       if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
+        # Use absolute paths so the Sonar scanner can always find the reports at repo root
         if [ -n "${{ inputs.test-directory }}" ]; then
-          IN_FILE="${{ inputs.test-directory }}/test-results.xml"
-          OUT_FILE="${{ inputs.test-directory }}/sonar-coverage.xml"
+          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.test-directory }}/test-results.xml"
+          OUT_FILE="$GITHUB_WORKSPACE/sonar-coverage.xml"
+          FALLBACK_COPY_DIR="$GITHUB_WORKSPACE/${{ inputs.test-directory }}"
         else
-          IN_FILE="test-results.xml"
-          OUT_FILE="sonar-coverage.xml"
+          IN_FILE="$GITHUB_WORKSPACE/test-results.xml"
+          OUT_FILE="$GITHUB_WORKSPACE/sonar-coverage.xml"
+          FALLBACK_COPY_DIR=""
         fi
         python3 "${{ github.action_path }}/../../scripts/terraform_junit_to_sonar_coverage.py" --input "$IN_FILE" --output "$OUT_FILE"
+        if [ -n "$FALLBACK_COPY_DIR" ] && [ -f "$OUT_FILE" ]; then
+          mkdir -p "$FALLBACK_COPY_DIR"
+          cp "$OUT_FILE" "$FALLBACK_COPY_DIR/sonar-coverage.xml" || true
+        fi
 
     - name: Validate SonarQube Test Report Contains Test Cases
       if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
@@ -117,7 +133,7 @@ runs:
         grep -q "<coverage " "$FILE"
 
     - name: Print Generated Reports
-      if: always() && steps.detect_terraform_tests.outputs.has-tests == 'true'
+      if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
@@ -132,7 +148,7 @@ runs:
         fi
 
     - name: Ensure Sonar report paths at repository root
-      if: always() && steps.detect_terraform_tests.outputs.has-tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
+      if: always() && steps.detect_terraform_tests.outputs.has_tests == 'true' && inputs.sonar-token != '' && inputs.sonar-host-url != ''
       shell: bash
       run: |
         # Try to copy sonar reports from the test-directory (if provided) into the repo root

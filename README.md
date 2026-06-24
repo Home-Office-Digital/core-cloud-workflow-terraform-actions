@@ -55,3 +55,16 @@ Craete a workflow file in your `.github/workflows` directory and populate with t
 ## Usage of composite actions
 Please refer to the [Terraform workflow file](https://github.com/Home-Office-Digital/core-cloud-workflow-terraform-actions/blob/main/.github/workflows/standard-pipeline.yml) for examples of using composite actions.
 NOTE: Running `terraform validate` has conditional logic to initialise the terraform code, so you don't need to add the `terraform init` fragment beforehand.
+
+Example: call the test composite action (remote action usage)
+
+```yaml
+- name: Run terraform tests and publish results (remote action branch)
+  id: terraform-test
+  uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@main
+  with:
+    working-directory: .
+    test-directory: tests/plan
+    sonar-host-url: ${{ secrets.SONAR_HOST_URL }}
+    sonar-token: ${{ secrets.SONAR_TOKEN }}
+```

@@ -28,7 +28,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if find . -type f -name "*.tftest.hcl" | grep -q .; then
+        if find . -path './.terraform/*' -type f -prune -o -name '*.tftest.hcl' -print | grep -q .; then
           echo "has_tests=true" >> "$GITHUB_OUTPUT"
           echo "Terraform tests detected. Running test steps."
         else

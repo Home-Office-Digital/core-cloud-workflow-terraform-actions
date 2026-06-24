@@ -11,9 +11,7 @@ from pathlib import Path
 
 
 RUN_BLOCK_PATTERN = re.compile(r'^\s*run\s+"([^"]+)"\s*\{')
-RESOURCE_BLOCK_PATTERN = re.compile(
-    r'^\s*resource\s+"(\w+)"\s+"(\w+)"\s*\{'
-)
+RESOURCE_BLOCK_PATTERN = re.compile(r'^\s*resource\s+"(\w+)"\s+"(\w+)"\s*\{')
 RESOURCE_REF_PATTERN = re.compile(r"\b(aws_\w+\.\w+)\b")
 
 
@@ -57,12 +55,7 @@ def iter_test_cases(root: ET.Element) -> list[tuple[str, ET.Element]]:
     for suite in suites:
         suite_name = suite.attrib.get("name", "")
         for case in suite.findall("testcase"):
-            file_path = (
-                case.attrib.get("classname")
-                or case.attrib.get("file")
-                or suite_name
-                or "terraform-test"
-            )
+            file_path = (case.attrib.get("classname") or case.attrib.get("file") or suite_name or "terraform-test")
             cases.append((file_path, case))
 
     return cases
@@ -112,7 +105,6 @@ def collect_resource_references_from_tests() -> set[str]:
     for test_file in sorted(tests_dir.rglob("*.tftest.hcl")):
         content = test_file.read_text(encoding="utf-8")
         references.update(RESOURCE_REF_PATTERN.findall(content))
-
     return references
 
 
@@ -132,7 +124,6 @@ def run_name_covered(run_name: str, passed_case_tokens: set[str]) -> bool:
     if run_token in passed_case_tokens:
         return True
 
-    # Terraform JUnit names can include prefixes/suffixes around the run block name.
     return any(
         token.endswith(f"_{run_token}")
         or token.startswith(f"{run_token}_")
@@ -157,20 +148,12 @@ def collect_cases_by_source(root: ET.Element) -> dict[str, list[ET.Element]]:
     return cases_by_source
 
 
-def add_file_coverage(
-    report: ET.Element,
-    source_path: str,
-    cases: list[ET.Element],
-) -> tuple[int, int]:
+def add_file_coverage(report: ET.Element, source_path: str, cases: list[ET.Element]) -> tuple[int, int]:
     run_blocks = parse_run_blocks(Path(source_path))
     if not run_blocks:
         return 0, 0
 
-    passed_case_tokens = {
-        normalize_name(case.attrib.get("name", ""))
-        for case in cases
-        if is_case_passed(case)
-    }
+    passed_case_tokens = {normalize_name(case.attrib.get("name", "")) for case in cases if is_case_passed(case)}
 
     file_element = ET.SubElement(report, "file", path=source_path)
     file_coverable = 0
@@ -178,6 +161,7 @@ def add_file_coverage(
 
     for run_name, line_no in run_blocks:
         covered = run_name_covered(run_name, passed_case_tokens)
+
         ET.SubElement(
             file_element,
             "lineToCover",
@@ -192,11 +176,7 @@ def add_file_coverage(
     return file_coverable, file_covered
 
 
-def add_tf_source_coverage(
-    report: ET.Element,
-    referenced_resources: set[str],
-    any_tests_passed: bool,
-) -> tuple[int, int]:
+def add_tf_source_coverage(report: ET.Element, referenced_resources: set[str], any_tests_passed: bool) -> tuple[int, int]:
     total_coverable = 0
     total_covered = 0
 
@@ -224,6 +204,7 @@ def add_tf_source_coverage(
 
         total_coverable += file_coverable
         total_covered += file_covered
+
         print(f"{tf_path}: {file_covered}/{file_coverable} resources covered")
 
     return total_coverable, total_covered
@@ -240,29 +221,17 @@ def build_report(input_path: Path, output_path: Path) -> None:
     root = ET.parse(input_path).getroot()
     cases_by_source = collect_cases_by_source(root)
     referenced_resources = collect_resource_references_from_tests()
-    any_tests_passed = any(
-        is_case_passed(case)
-        for cases in cases_by_source.values()
-        for case in cases
-    )
+    any_tests_passed = any(is_case_passed(case) for cases in cases_by_source.values() for case in cases)
 
     total_coverable = 0
     total_covered = 0
 
     for source_path in sorted(cases_by_source):
-        file_coverable, file_covered = add_file_coverage(
-            report,
-            source_path,
-            cases_by_source[source_path],
-        )
+        file_coverable, file_covered = add_file_coverage(report, source_path, cases_by_source[source_path])
         total_coverable += file_coverable
         total_covered += file_covered
 
-    tf_coverable, tf_covered = add_tf_source_coverage(
-        report,
-        referenced_resources,
-        any_tests_passed,
-    )
+    tf_coverable, tf_covered = add_tf_source_coverage(report, referenced_resources, any_tests_passed)
     total_coverable += tf_coverable
     total_covered += tf_covered
 
@@ -272,59 +241,3 @@ def build_report(input_path: Path, output_path: Path) -> None:
         print("No run blocks found for coverage mapping.")
     else:
         print(f"Overall run-block coverage: {total_covered}/{total_coverable}")
-
-
-def map_resources_to_tests(test_cases: list[tuple[str, ET.Element]]) -> dict[str, set[str]]:
-    """
-    Map Terraform resources to their corresponding test cases.
-
-    Args:
-        test_cases: A list of tuples containing test case names and their XML elements.
-
-    Returns:
-        A dictionary mapping resource names to sets of test case names.
-    """
-    resource_to_tests = defaultdict(set)
-
-    for test_name, test_case in test_cases:
-        hcl_path = resolve_tests_hcl_path(test_name)
-        if not hcl_path:
-            continue
-
-        with open(hcl_path, "r") as hcl_file:
-            for line in hcl_file:
-                match = RESOURCE_REF_PATTERN.search(line)
-                if match:
-                    resource_name = match.group(1)
-                    resource_to_tests[resource_name].add(test_name)
-
-    return resource_to_tests
-
-
-def write_coverage_report(resource_to_tests: dict[str, set[str]], output_path: str) -> None:
-    """
-    Write the SonarQube coverage report based on resource-to-test mappings.
-
-    Args:
-        resource_to_tests: A dictionary mapping resource names to sets of test case names.
-        output_path: Path to the output SonarQube coverage XML file.
-    """
-    coverage_root = ET.Element("coverage")
-
-    for resource, tests in resource_to_tests.items():
-        file_element = ET.SubElement(coverage_root, "file", path=resource)
-        for test in tests:
-            ET.SubElement(file_element, "lineToCover", lineNumber="1", covered="true")
-
-    tree = ET.ElementTree(coverage_root)
-    tree.write(output_path, encoding="utf-8", xml_declaration=True)
-
-
-def main() -> int:
-    args = parse_args()
-    build_report(Path(args.input), Path(args.output))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

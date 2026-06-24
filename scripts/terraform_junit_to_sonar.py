@@ -122,13 +122,7 @@ def with_test_context(file_path: str, case_name: str, details: str) -> str:
     return first_line
 
 
-def attach_outcome(
-    test_case: ET.Element,
-    outcome_tag: str,
-    file_path: str,
-    case_name: str,
-    details: str,
-) -> None:
+def attach_outcome(test_case: ET.Element, outcome_tag: str, file_path: str, case_name: str, details: str) -> None:
     context = with_test_context(file_path, case_name, details)
     outcome = ET.SubElement(test_case, outcome_tag, message=context)
     outcome.text = context
@@ -145,12 +139,7 @@ def iter_test_cases(root: ET.Element) -> list[tuple[str, str, ET.Element]]:
     for suite in suites:
         suite_name = suite.attrib.get("name", "")
         for case in suite.findall("testcase"):
-            file_path = (
-                case.attrib.get("classname")
-                or case.attrib.get("file")
-                or suite_name
-                or "terraform-test"
-            )
+            file_path = (case.attrib.get("classname") or case.attrib.get("file") or suite_name or "terraform-test")
             cases.append((file_path, suite_name, case))
 
     return cases
@@ -160,12 +149,10 @@ def resolve_tests_hcl_path(raw_path: str) -> str | None:
     normalized = (raw_path or "").strip().replace("\\", "/")
     if not normalized.endswith(".tftest.hcl"):
         return None
-
     parts = [part for part in normalized.split("/") if part]
     if "tests" in parts:
         idx = parts.index("tests")
         return "/".join(parts[idx:])
-
     return None
 
 
@@ -208,41 +195,16 @@ def build_report(input_path: Path, output_path: Path) -> None:
                 file_element = ET.SubElement(report, "file", path=report_file_path)
                 files[report_file_path] = file_element
 
-            display_case_name = build_case_name(
-                mapped_file_path,
-                case_name,
-                failed_or_errored,
-            )
+            display_case_name = build_case_name(mapped_file_path, case_name, failed_or_errored)
 
-            test_case = ET.SubElement(
-                file_element,
-                "testCase",
-                name=display_case_name,
-                duration=duration_to_millis(case.attrib.get("time")),
-            )
+            test_case = ET.SubElement(file_element, "testCase", name=display_case_name, duration=duration_to_millis(case.attrib.get("time")))
 
             if failure is not None:
-                ET.SubElement(
-                    test_case,
-                    "failure",
-                    message=failure_message(mapped_file_path, case_name, failure),
-                )
+                ET.SubElement(test_case, "failure", message=failure_message(mapped_file_path, case_name, failure))
             elif error is not None:
-                attach_outcome(
-                    test_case,
-                    "error",
-                    mapped_file_path,
-                    case_name,
-                    first_text(error, "Test errored"),
-                )
+                attach_outcome(test_case, "error", mapped_file_path, case_name, first_text(error, "Test errored"))
             elif skipped is not None:
-                attach_outcome(
-                    test_case,
-                    "skipped",
-                    mapped_file_path,
-                    case_name,
-                    first_text(skipped, "Test skipped"),
-                )
+                attach_outcome(test_case, "skipped", mapped_file_path, case_name, first_text(skipped, "Test skipped"))
 
             counts_by_file[report_file_path] += 1
 
@@ -257,13 +219,3 @@ def build_report(input_path: Path, output_path: Path) -> None:
             print(f"  {path}: {counts_by_file[path]} tests")
     else:
         print("No tests/*.hcl testcases were found in JUnit input.")
-
-
-def main() -> int:
-    args = parse_args()
-    build_report(Path(args.input), Path(args.output))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

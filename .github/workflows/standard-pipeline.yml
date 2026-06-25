@@ -87,7 +87,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
+        uses: ./actions/init
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -102,13 +102,13 @@ jobs:
 
       - name: Terraform Fmt
         id: quality-checks
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@main
+        uses: ./actions/fmt
         with:
           working-directory: ${{ inputs.working-directory }}
 
       - name: Terraform Validate
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@main
+        uses: ./actions/validate
         with:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -116,13 +116,14 @@ jobs:
       # TODO: TFLint is not part of the official terraform CLI and is more complex. Suggest keeping that in separate repo and pointing to it here, with the ability to disable
       - name: TFLint
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@main
+        # v0.3.2
+        uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@268b840d0e48fa86be281a5727909655311f7af4
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Terraform Test
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@main
+        uses: ./actions/test
         with:
           working-directory: ${{ inputs.working-directory }}
           sonar-host-url: ${{ secrets.sonar_host_url }}
@@ -131,7 +132,7 @@ jobs:
       - name: Terraform Plan
         if: ${{ inputs.use-backend == true }}
         id: plan
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
+        uses: ./actions/plan
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -144,7 +145,7 @@ jobs:
       - name: Terraform Apply
         if: ${{ inputs.use-backend == true && github.ref_name == inputs.apply-branch }}
         id: apply
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
+        uses: ./actions/apply
         with:
           apply-branch: ${{ inputs.apply-branch }}
           account_id: ${{ secrets.ACCOUNT_ID }}

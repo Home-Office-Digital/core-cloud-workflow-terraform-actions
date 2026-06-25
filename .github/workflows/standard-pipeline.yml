@@ -85,9 +85,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Checkout Terraform Actions
+        uses: actions/checkout@v4
+        with:
+          repository: Home-Office-Digital/core-cloud-workflow-terraform-actions
+          ref: ${{ github.job_workflow_sha }}
+          path: _workflow-actions
+
       - name: Terraform Init
         id: init
-        uses: ./actions/init
+        uses: ./_workflow-actions/actions/init
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -102,13 +109,13 @@ jobs:
 
       - name: Terraform Fmt
         id: quality-checks
-        uses: ./actions/fmt
+        uses: ./_workflow-actions/actions/fmt
         with:
           working-directory: ${{ inputs.working-directory }}
 
       - name: Terraform Validate
         if: success() || failure()
-        uses: ./actions/validate
+        uses: ./_workflow-actions/actions/validate
         with:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -123,7 +130,7 @@ jobs:
 
       - name: Terraform Test
         if: success() || failure()
-        uses: ./actions/test
+        uses: ./_workflow-actions/actions/test
         with:
           working-directory: ${{ inputs.working-directory }}
           sonar-host-url: ${{ secrets.sonar_host_url }}
@@ -132,7 +139,7 @@ jobs:
       - name: Terraform Plan
         if: ${{ inputs.use-backend == true }}
         id: plan
-        uses: ./actions/plan
+        uses: ./_workflow-actions/actions/plan
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -145,7 +152,7 @@ jobs:
       - name: Terraform Apply
         if: ${{ inputs.use-backend == true && github.ref_name == inputs.apply-branch }}
         id: apply
-        uses: ./actions/apply
+        uses: ./_workflow-actions/actions/apply
         with:
           apply-branch: ${{ inputs.apply-branch }}
           account_id: ${{ secrets.ACCOUNT_ID }}

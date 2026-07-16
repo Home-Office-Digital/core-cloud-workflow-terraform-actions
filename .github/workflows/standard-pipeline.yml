@@ -68,6 +68,8 @@ on:
     secrets:
       account_id:
         required: false
+      git_auth_token:
+        required: false
       sonar_host_url:
         required: false
       sonar_token:
@@ -101,8 +103,12 @@ jobs:
       - name: Run Optional Pre-Exec Commands
         shell: bash
         env:
+          CUSTOM_GITHUB_TOKEN: ${{ secrets.git_auth_token }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          if [ -n "$CUSTOM_GITHUB_TOKEN" ]; then
+            export GITHUB_TOKEN="$CUSTOM_GITHUB_TOKEN"
+          fi
           if [ -n "${{ inputs.pre-exec-script }}" ]; then
             eval "${{ inputs.pre-exec-script }}"
           fi

@@ -41,6 +41,16 @@ on:
         required: false
         default: "~1.7.0"
         type: string
+      pre-exec-script:
+        description: "Optional multiline shell script to run before Terraform steps"
+        required: false
+        default: ""
+        type: string
+      tf-aws-tag-policy-compliance:
+        description: "Optional value for TF_AWS_TAG_POLICY_COMPLIANCE env var"
+        required: false
+        default: ""
+        type: string
       tfvars-file:
         required: false
         type: string
@@ -73,6 +83,9 @@ jobs:
     name: "Terraform Standardised Pipeline"
     runs-on: ubuntu-latest
     environment: ${{ inputs.github-environment }}
+    env:
+      TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
+      INPUT_PRE_EXEC_SCRIPT: ${{ inputs.pre-exec-script }}
 
     permissions:
       contents: read
@@ -84,6 +97,15 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Run Optional Pre-Exec Commands
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ inputs.pre-exec-script }}" ]; then
+            eval "${{ inputs.pre-exec-script }}"
+          fi
 
       - name: Terraform Init
         id: init

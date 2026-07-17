@@ -111,8 +111,8 @@ jobs:
             echo "Testing custom GITHUB_TOKEN for git config"
             git clone https://x-access-token:$GITHUB_TOKEN@github.com/Home-Office-Digital/core-cloud-dynatrace-dashboard-tiles.git /tmp/dashboard-tiles
           fi
-          if [ -n "${{ inputs.pre-exec-script }}" ]; then
-            eval "${{ inputs.pre-exec-script }}"            
+          if [ -n "$INPUT_PRE_EXEC_SCRIPT" ]; then
+            eval "$INPUT_PRE_EXEC_SCRIPT"
           fi
 
       - name: Terraform Init

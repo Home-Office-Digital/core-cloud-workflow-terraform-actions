@@ -110,6 +110,7 @@ jobs:
             export GITHUB_TOKEN="$CUSTOM_GITHUB_TOKEN"
             echo "Testing custom GITHUB_TOKEN for git config"
             git clone https://x-access-token:$GITHUB_TOKEN@github.com/Home-Office-Digital/core-cloud-dynatrace-dashboard-tiles.git /tmp/dashboard-tiles
+            ls -l /tmp/dashboard-tiles
           fi
           if [ -n "$INPUT_PRE_EXEC_SCRIPT" ]; then
             eval "$INPUT_PRE_EXEC_SCRIPT"

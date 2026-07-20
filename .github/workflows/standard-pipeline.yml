@@ -103,12 +103,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Export dynamic secret payload
-        if: ${{ secrets['dynamic-secrets-json'] != '' && secrets['dynamic-secrets-json'] != '{}' }}
         shell: bash
         env:
           DYNAMIC_SECRETS_JSON: ${{ secrets['dynamic-secrets-json'] }}
         run: |
           set -euo pipefail
+
+          if [ -z "$DYNAMIC_SECRETS_JSON" ] || [ "$DYNAMIC_SECRETS_JSON" = "{}" ]; then
+            exit 0
+          fi
 
           if ! echo "$DYNAMIC_SECRETS_JSON" | jq -e 'type == "object"' >/dev/null 2>&1; then
             echo "dynamic-secrets-json must be a valid JSON object"

@@ -74,6 +74,8 @@ on:
         required: false
       sonar_token:
         required: false
+      dynamic-secrets-json:
+        required: false
 
 permissions:
   contents: read
@@ -99,6 +101,25 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Export dynamic secret payload
+        if: ${{ secrets['dynamic-secrets-json'] != '' && secrets['dynamic-secrets-json'] != '{}' }}
+        shell: bash
+        env:
+          DYNAMIC_SECRETS_JSON: ${{ secrets['dynamic-secrets-json'] }}
+        run: |
+          set -euo pipefail
+
+          if ! echo "$DYNAMIC_SECRETS_JSON" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            echo "dynamic-secrets-json must be a valid JSON object"
+            exit 1
+          fi
+
+          while IFS= read -r key; do
+            value="$(echo "$DYNAMIC_SECRETS_JSON" | jq -r --arg k "$key" '.[$k]')"
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done < <(echo "$DYNAMIC_SECRETS_JSON" | jq -r 'keys[]')
 
       - name: Run Optional Pre-Exec Commands
         shell: bash

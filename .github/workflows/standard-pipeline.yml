@@ -74,6 +74,10 @@ on:
         required: false
       sonar_token:
         required: false
+      github_app_client_id:
+        required: false
+      github_app_private_key:
+        required: false
 
 permissions:
   contents: read
@@ -100,17 +104,25 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Use github appid and key
+        if: ${{ secrets.github_app_client_id && secrets.github_app_private_key }}
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.github_app_client_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: Home-Office-Digital
+
       - name: Run Optional Pre-Exec Commands
         shell: bash
         env:
           CUSTOM_GITHUB_TOKEN: ${{ secrets.git_auth_token }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "$CUSTOM_GITHUB_TOKEN" ]; then
+          if [[ -n ${{ steps.app-token.outputs.token }} ]]; then
+            export GITHUB_TOKEN="${{ steps.app-token.outputs.token }}"
+          elif [ -n "$CUSTOM_GITHUB_TOKEN" ]; then
             export GITHUB_TOKEN="$CUSTOM_GITHUB_TOKEN"
-            echo "Testing custom GITHUB_TOKEN for git config"
-            git clone https://x-access-token:$GITHUB_TOKEN@github.com/Home-Office-Digital/core-cloud-dynatrace-dashboard-tiles.git /tmp/dashboard-tiles
-            ls -l /tmp/dashboard-tiles
           fi
           if [ -n "$INPUT_PRE_EXEC_SCRIPT" ]; then
             eval "$INPUT_PRE_EXEC_SCRIPT"

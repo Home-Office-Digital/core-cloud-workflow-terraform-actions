@@ -41,6 +41,16 @@ on:
         required: false
         default: "~1.7.0"
         type: string
+      pre-exec-script:
+        description: "Optional multiline shell script to run before Terraform steps"
+        required: false
+        default: ""
+        type: string
+      tf-aws-tag-policy-compliance:
+        description: "Optional value for TF_AWS_TAG_POLICY_COMPLIANCE env var"
+        required: false
+        default: ""
+        type: string
       tfvars-file:
         required: false
         type: string
@@ -58,9 +68,15 @@ on:
     secrets:
       account_id:
         required: false
+      git_auth_token:
+        required: false
       sonar_host_url:
         required: false
       sonar_token:
+        required: false
+      github_app_client_id:
+        required: false
+      github_app_private_key:
         required: false
 
 permissions:
@@ -73,6 +89,11 @@ jobs:
     name: "Terraform Standardised Pipeline"
     runs-on: ubuntu-latest
     environment: ${{ inputs.github-environment }}
+    env:
+      TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
+      INPUT_PRE_EXEC_SCRIPT: ${{ inputs.pre-exec-script }}
+      GITHUB_APP_CLIENT_ID: ${{ secrets.github_app_client_id }}
+      GITHUB_APP_PRIVATE_KEY: ${{ secrets.github_app_private_key }}
 
     permissions:
       contents: read
@@ -84,6 +105,31 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Use github appid and key
+        if: ${{ env.GITHUB_APP_CLIENT_ID != '' && env.GITHUB_APP_PRIVATE_KEY != '' }}
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.GITHUB_APP_CLIENT_ID }}
+          private-key: ${{ env.GITHUB_APP_PRIVATE_KEY }}
+          owner: Home-Office-Digital
+
+      - name: Run Optional Pre-Exec Commands
+        shell: bash
+        env:
+          CUSTOM_GITHUB_TOKEN: ${{ secrets.git_auth_token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$APP_TOKEN" ]; then
+            export GITHUB_TOKEN="$APP_TOKEN"
+          elif [ -n "$CUSTOM_GITHUB_TOKEN" ]; then
+            export GITHUB_TOKEN="$CUSTOM_GITHUB_TOKEN"
+          fi
+          if [ -n "$INPUT_PRE_EXEC_SCRIPT" ]; then
+            eval "$INPUT_PRE_EXEC_SCRIPT"
+          fi
 
       - name: Terraform Init
         id: init

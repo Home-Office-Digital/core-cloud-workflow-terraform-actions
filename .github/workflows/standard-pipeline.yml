@@ -13,6 +13,11 @@ on:
         default: eu-west-2
         required: false
         type: string
+      fmt-recursive:
+        description: "Whether to run terraform fmt recursively across subdirectories"
+        required: false
+        default: true
+        type: boolean
       github-environment:
         description: "The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also."
         required: false
@@ -151,6 +156,7 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@main
         with:
           working-directory: ${{ inputs.working-directory }}
+          recursive: ${{ inputs.fmt-recursive }}
 
       - name: Terraform Validate
         if: success() || failure()

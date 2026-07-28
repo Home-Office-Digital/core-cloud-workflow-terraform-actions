@@ -10,6 +10,10 @@ inputs:
     description: "Directory of the Terraform code"
     required: false
     default: "."
+  recursive:
+    description: "Whether to run terraform fmt recursively across subdirectories"
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
@@ -24,9 +28,14 @@ runs:
       shell: bash
       run: |
         DIFF_FILE="${{ github.workspace }}/fmt_diff.txt"
-        cd "${{ inputs.working_directory }}"
+        cd "${{ inputs.working-directory }}"
 
-        terraform fmt -recursive -diff -check 2>&1 | tee "$DIFF_FILE"
+        RECURSIVE_FLAG=""
+        if [ "${{ inputs.recursive }}" == "true" ]; then
+          RECURSIVE_FLAG="-recursive"
+        fi
+
+        terraform fmt $RECURSIVE_FLAG -diff -check 2>&1 | tee "$DIFF_FILE"
         
         if [ -s "$DIFF_FILE" ]; then
           echo "FMT_Outcome=failed" >> $GITHUB_ENV
@@ -66,4 +75,5 @@ runs:
         echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
         echo "| Working Directory | \`${{ inputs.working-directory }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "| Terraform Version | \`${{ inputs.terraform-version }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Recursive | \`${{ inputs.recursive }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY

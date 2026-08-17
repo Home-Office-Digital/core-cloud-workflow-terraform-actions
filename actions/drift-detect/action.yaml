@@ -1,30 +1,51 @@
 name: "Terraform Drift Detect"
-description: "Run Terraform plan with -detailed-exitcode to detect infrastructure drift"
+description: "Detect infrastructure drift using Terraform plan and notify via Slack"
 
 inputs:
-  working-directory:
-    description: 'Directory containing Terraform configuration'
+  account_id:
+    description: "AWS Account ID"
+    required: true
+  aws-region:
+    description: "AWS Region for the State Bucket and Resources"
+    default: eu-west-2
     required: false
-    default: '.'
-    type: string
-  tfvars-file:
-    description: 'Optional path to a .tfvars file'
-    required: false
-    default: ''
     type: string
   github-environment:
-    description: 'Environment name for summary output'
+    description: "The name of your AWS environment"
     required: false
-    default: 'placeholder'
+    default: "placeholder"
+    type: string
+  role-to-assume:
+    description: "AWS Role name for OIDC"
+    required: true
+    type: string
+  terraform-version:
+    description: "Terraform version to use"
+    required: false
+    default: "~1.7.0"
+    type: string
+  tfvars-file:
+    description: "Optional path to a .tfvars file"
+    required: false
+    default: ""
+    type: string
+  working-directory:
+    description: "Directory containing Terraform configuration"
+    required: false
+    default: "."
+    type: string
+  webhook-url:
+    description: "Slack Incoming Webhook URL"
+    required: true
     type: string
 
 outputs:
   drift-detected:
-    description: 'Whether drift was detected (true/false)'
-    value: ${{ steps.plan.outputs.drift-detected }}
+    description: "Whether drift was detected (true/false)"
+    value: ${{ steps.check-drift.outputs.drift-detected }}
   plan-exit-code:
-    description: 'Raw terraform plan exit code (0, 1, or 2)'
-    value: ${{ steps.plan.outputs.plan-exit-code }}
+    description: "Raw terraform plan exit code (0, 1, or 2)"
+    value: ${{ steps.check-drift.outputs.plan-exit-code }}
 
 runs:
   using: composite
@@ -39,41 +60,57 @@ runs:
           exit 1
         fi
 
-    - name: Terraform Plan (Drift Detection)
+    - name: Terraform Plan
       id: plan
+      uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
+      with:
+        account_id: ${{ inputs.account_id }}
+        aws-region: ${{ inputs.aws-region }}
+        github-environment: ${{ inputs.github-environment }}
+        role-to-assume: ${{ inputs.role-to-assume }}
+        terraform-version: ${{ inputs.terraform-version }}
+        tfvars-file: ${{ inputs.tfvars-file }}
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: Check for Drift
+      id: check-drift
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        set +e
-        if [ -n "${{ inputs.tfvars-file }}" ]; then
-          terraform plan -detailed-exitcode -input=false -var-file="${{ inputs.tfvars-file }}"
-        else
-          terraform plan -detailed-exitcode -input=false
-        fi
-        EXIT_CODE=$?
-        set -e
+        PLAN_JSON=$(terraform show -json tfplan)
 
-        echo "plan-exit-code=$EXIT_CODE" >> $GITHUB_OUTPUT
+        CHANGES=$(echo "$PLAN_JSON" | jq '[.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] | length')
 
-        if [ $EXIT_CODE -eq 0 ]; then
-          echo "drift-detected=false" >> $GITHUB_OUTPUT
-        elif [ $EXIT_CODE -eq 2 ]; then
+        if [ "$CHANGES" -gt 0 ]; then
           echo "drift-detected=true" >> $GITHUB_OUTPUT
+          echo "plan-exit-code=2" >> $GITHUB_OUTPUT
         else
           echo "drift-detected=false" >> $GITHUB_OUTPUT
-          exit 1
+          echo "plan-exit-code=0" >> $GITHUB_OUTPUT
         fi
+
+    - name: Notify Slack
+      if: always()
+      uses: slackapi/slack-github-action@v2
+      with:
+        webhook: ${{ inputs.webhook-url }}
+        webhook-type: incoming-webhook
+        payload: |
+          {
+            "text": "Drift check for ${{ github.repository }} (${{ inputs.github-environment }}): ${{ steps.check-drift.outputs.drift-detected == 'true' && '⚠️ Drift detected' || steps.check-drift.outputs.plan-exit-code == '0' && '✅ No drift' || '❌ Check failed' }} — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+          }
 
     - name: Write Step Summary
       if: always()
       shell: bash
       env:
-        EXIT_CODE: ${{ steps.plan.outputs.plan-exit-code }}
+        DRIFT_DETECTED: ${{ steps.check-drift.outputs.drift-detected }}
+        EXIT_CODE: ${{ steps.check-drift.outputs.plan-exit-code }}
         ENVIRONMENT: ${{ inputs.github-environment }}
         WORKING_DIR: ${{ inputs.working-directory }}
       run: |
         REPO="${GITHUB_REPOSITORY}"
-        if [ "$EXIT_CODE" == "2" ]; then
+        if [ "$DRIFT_DETECTED" == "true" ]; then
           echo "## :warning: Drift Detected" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY

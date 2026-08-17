@@ -52,6 +52,10 @@ Craete a workflow file in your `.github/workflows` directory and populate with t
         secrets:
           account_id: ${{ secrets.ACCOUNT_ID }}
 
+## Drift Detection
+
+Scheduled drift detection with Slack notifications is available via a separate reusable workflow. See [docs/drift-detection.md](docs/drift-detection.md) for setup instructions.
+
 ## Usage of composite actions
 Please refer to the [Terraform workflow file](https://github.com/Home-Office-Digital/core-cloud-workflow-terraform-actions/blob/main/.github/workflows/standard-pipeline.yml) for examples of using composite actions.
 NOTE: Running `terraform validate` has conditional logic to initialise the terraform code, so you don't need to add the `terraform init` fragment beforehand.

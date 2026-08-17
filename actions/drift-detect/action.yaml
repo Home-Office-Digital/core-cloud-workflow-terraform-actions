@@ -128,7 +128,7 @@ runs:
       if: always()
       uses: slackapi/slack-github-action@v2
       with:
-        webhook: ${{ secrets.DRIFT_DETECTION_WEBHOOK_URL }}
+        webhook: ${{ inputs.webhook-url }}
         webhook-type: incoming-webhook
         payload: |
           {

@@ -1,0 +1,99 @@
+name: "Terraform Drift Detect"
+description: "Run Terraform plan with -detailed-exitcode to detect infrastructure drift"
+
+inputs:
+  working-directory:
+    description: 'Directory containing Terraform configuration'
+    required: false
+    default: '.'
+    type: string
+  tfvars-file:
+    description: 'Optional path to a .tfvars file'
+    required: false
+    default: ''
+    type: string
+  github-environment:
+    description: 'Environment name for summary output'
+    required: false
+    default: 'placeholder'
+    type: string
+
+outputs:
+  drift-detected:
+    description: 'Whether drift was detected (true/false)'
+    value: ${{ steps.plan.outputs.drift-detected }}
+  plan-exit-code:
+    description: 'Raw terraform plan exit code (0, 1, or 2)'
+    value: ${{ steps.plan.outputs.plan-exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate tfvars file
+      if: ${{ inputs.tfvars-file != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ ! -f "${{ inputs.tfvars-file }}" ]; then
+          echo "::error::Variable file '${{ inputs.tfvars-file }}' not found"
+          exit 1
+        fi
+
+    - name: Terraform Plan (Drift Detection)
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set +e
+        if [ -n "${{ inputs.tfvars-file }}" ]; then
+          terraform plan -detailed-exitcode -input=false -var-file="${{ inputs.tfvars-file }}"
+        else
+          terraform plan -detailed-exitcode -input=false
+        fi
+        EXIT_CODE=$?
+        set -e
+
+        echo "plan-exit-code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "drift-detected=false" >> $GITHUB_OUTPUT
+        elif [ $EXIT_CODE -eq 2 ]; then
+          echo "drift-detected=true" >> $GITHUB_OUTPUT
+        else
+          echo "drift-detected=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Write Step Summary
+      if: always()
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.plan.outputs.plan-exit-code }}
+        ENVIRONMENT: ${{ inputs.github-environment }}
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: |
+        REPO="${GITHUB_REPOSITORY}"
+        if [ "$EXIT_CODE" == "2" ]; then
+          echo "## :warning: Drift Detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | \`$REPO\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`$ENVIRONMENT\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Working Directory | \`$WORKING_DIR\` |" >> $GITHUB_STEP_SUMMARY
+        elif [ "$EXIT_CODE" == "0" ]; then
+          echo "## :white_check_mark: No Drift Detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | \`$REPO\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`$ENVIRONMENT\` |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## :x: Plan Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | \`$REPO\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`$ENVIRONMENT\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Working Directory | \`$WORKING_DIR\` |" >> $GITHUB_STEP_SUMMARY
+        fi

@@ -9,7 +9,7 @@ This feature adds a reusable GitHub Actions workflow for detecting Terraform inf
 - **Drift_Detection_Workflow**: The reusable GitHub Actions workflow (`workflow_call`) that orchestrates scheduled Terraform drift detection and Slack alerting.
 - **Drift**: A state where the actual cloud infrastructure differs from the Terraform-declared configuration, detected when `terraform plan -detailed-exitcode` returns exit code 2.
 - **Consumer_Repository**: A repository that calls the Drift_Detection_Workflow via `workflow_call` and provides its own schedule trigger and configuration inputs.
-- **Slack_Notifier**: The component within the Drift_Detection_Workflow responsible for sending a message to a configured Slack channel when Drift is detected.
+- **Slack_Notifier**: The component within the Drift_Detection_Workflow responsible for posting a JSON payload to an incoming webhook URL when Drift is detected.
 - **Init_Action**: The existing composite action (`actions/init`) that handles AWS OIDC authentication, S3 state bucket bootstrapping, and `terraform init`.
 - **Plan_Exit_Code**: The exit code returned by `terraform plan -detailed-exitcode` — 0 means no changes, 1 means error, 2 means Drift detected.
 
@@ -67,12 +67,11 @@ This feature adds a reusable GitHub Actions workflow for detecting Terraform inf
 
 #### Acceptance Criteria
 
-1. WHEN Drift is detected, THE Slack_Notifier SHALL send a message to the Slack channel specified by the `slack-channel-id` input.
-2. THE Slack_Notifier SHALL authenticate to Slack using a `slack-bot-token` secret provided by the Consumer_Repository.
-3. WHEN Drift is detected, THE Slack_Notifier SHALL include in the message: the repository name, the GitHub environment name, the working directory, and a link to the workflow run.
-4. WHEN `terraform plan -detailed-exitcode` returns exit code 0, THE Slack_Notifier SHALL NOT send a notification.
-5. WHEN `terraform plan -detailed-exitcode` returns exit code 1, THE Slack_Notifier SHALL send an error notification indicating the plan failed, including the repository name, the GitHub environment name, and a link to the workflow run.
-6. IF Slack message delivery fails, THEN THE Drift_Detection_Workflow SHALL report the delivery failure in the workflow logs but SHALL NOT fail the overall workflow run.
+1. WHEN Drift is detected, THE Slack_Notifier SHALL send a notification by posting a JSON payload to the incoming webhook URL provided by the `drift_detection_webhook_url` secret.
+2. WHEN Drift is detected, THE Slack_Notifier SHALL include in the message: the repository name, the GitHub environment name, the working directory, and a link to the workflow run.
+3. WHEN `terraform plan -detailed-exitcode` returns exit code 0, THE Slack_Notifier SHALL NOT send a notification.
+4. WHEN `terraform plan -detailed-exitcode` returns exit code 1, THE Slack_Notifier SHALL send an error notification by posting a JSON payload to the incoming webhook URL, indicating the plan failed, including the repository name, the GitHub environment name, and a link to the workflow run.
+5. IF Slack message delivery fails, THEN THE Drift_Detection_Workflow SHALL report the delivery failure in the workflow logs but SHALL NOT fail the overall workflow run.
 
 ### Requirement 6: Workflow Inputs and Configuration
 
@@ -80,9 +79,9 @@ This feature adds a reusable GitHub Actions workflow for detecting Terraform inf
 
 #### Acceptance Criteria
 
-1. THE Drift_Detection_Workflow SHALL accept the following inputs with their default values: `aws-region` (default: `eu-west-2`), `github-environment` (default: `placeholder`), `role-to-assume` (required, no default), `state-bucket` (required, no default), `state-dynamodb-table` (default: empty string), `state-key` (default: `terraform.tfstate`), `terraform-version` (default: `~1.7.0`), `working-directory` (default: `.`), `tfvars-file` (default: empty string), `slack-channel-id` (required, no default), `pre-exec-script` (default: empty string).
-2. THE Drift_Detection_Workflow SHALL accept the following secrets: `account_id` (required), `slack_bot_token` (required), `git_auth_token` (optional).
-3. THE Drift_Detection_Workflow SHALL validate that all required inputs (`role-to-assume`, `state-bucket`, `slack-channel-id`) and required secrets (`account_id`, `slack_bot_token`) are provided before executing any Terraform commands.
+1. THE Drift_Detection_Workflow SHALL accept the following inputs with their default values: `aws-region` (default: `eu-west-2`), `github-environment` (default: `placeholder`), `role-to-assume` (required, no default), `state-bucket` (required, no default), `state-dynamodb-table` (default: empty string), `state-key` (default: `terraform.tfstate`), `terraform-version` (default: `~1.7.0`), `working-directory` (default: `.`), `tfvars-file` (default: empty string), `pre-exec-script` (default: empty string).
+2. THE Drift_Detection_Workflow SHALL accept the following secrets: `account_id` (required), `drift_detection_webhook_url` (required), `git_auth_token` (optional).
+3. THE Drift_Detection_Workflow SHALL validate that all required inputs (`role-to-assume`, `state-bucket`) and required secrets (`account_id`, `drift_detection_webhook_url`) are provided before executing any Terraform commands.
 
 ### Requirement 7: Pre-Execution Script Support
 

@@ -36,7 +36,7 @@ flowchart TD
     subgraph External_Services
         D --> AWS[AWS via OIDC]
         E --> AWS
-        J --> Slack[Slack API]
+        J --> Slack[Slack Incoming Webhook]
         K --> Slack
     end
 ```
@@ -48,7 +48,7 @@ flowchart TD
 | Separate composite action for drift detection | `actions/drift-detect/action.yaml` | Follows existing pattern (init, plan, apply are all separate actions). Allows the action to be reused independently of the workflow. |
 | Slack notification in workflow, not in composite action | Inline step in `drift-detection.yml` | Slack is a workflow-level concern (needs secrets). Keeping it in the workflow avoids coupling the drift-detect action to a specific notification channel. |
 | Consumer owns the schedule trigger | Consumer defines `on: schedule` | Different teams have different maintenance windows. The reusable workflow cannot define its own schedule since `workflow_call` workflows are triggered by callers. |
-| `slackapi/slack-github-action@v4` with `chat.postMessage` | Official Slack GitHub Action using bot token | Well-maintained, supports Block Kit for rich messages, and uses bot tokens (short-lived, scoped) rather than webhooks. |
+| Incoming webhook URL via `curl` | POST JSON payload to `drift_detection_webhook_url` secret | Simpler than bot token/OAuth — no app installation, no `chat:write` scope, no channel ID input needed. The webhook URL targets a fixed channel configured in Slack. Supports Block Kit payloads for rich formatting. |
 | 10-minute timeout on plan step | `timeout-minutes: 10` on the step | Prevents hung plan operations from consuming runner time indefinitely. Matches Requirement 4.7. |
 | Summary written by composite action | `$GITHUB_STEP_SUMMARY` written in `actions/drift-detect` | The composite action already knows the exit code and context. Writing summary there avoids duplicating logic in the workflow. |
 
@@ -174,7 +174,7 @@ sequenceDiagram
     participant PreExec as Pre-Exec Script
     participant Init as actions/init
     participant DriftDetect as actions/drift-detect
-    participant Slack as Slack API
+    participant Slack as Slack Webhook
 
     Runner->>Runner: Checkout code
     alt pre-exec-script provided
@@ -189,9 +189,9 @@ sequenceDiagram
     Runner->>DriftDetect: Terraform Plan -detailed-exitcode (10min timeout)
     DriftDetect-->>Runner: drift-detected, plan-exit-code
     alt drift-detected == true
-        Runner->>Slack: Post drift alert message
+        Runner->>Slack: POST drift alert JSON
     else plan-exit-code == 1
-        Runner->>Slack: Post error alert message
+        Runner->>Slack: POST error alert JSON
     else No drift
         Runner->>Runner: Skip notification
     end
@@ -199,37 +199,43 @@ sequenceDiagram
 
 ### Component 3: Slack Notification Steps
 
-**Purpose:** Sends a Block Kit message to a configured Slack channel when drift or errors are detected.
+**Purpose:** Sends a Block Kit message to a fixed Slack channel (configured in the webhook) when drift or errors are detected.
 
-**Implementation:** Uses `slackapi/slack-github-action@v4` with the `chat.postMessage` method.
+**Implementation:** Uses `curl` to POST a JSON payload to the incoming webhook URL provided by the `drift_detection_webhook_url` secret. The channel is baked into the webhook configuration in Slack — no channel ID input is needed.
 
 **Drift Alert Message Structure:**
 
 ```yaml
 - name: Notify Slack - Drift Detected
   if: ${{ steps.drift-detect.outputs.drift-detected == 'true' }}
-  uses: slackapi/slack-github-action@v4
-  with:
-    method: chat.postMessage
-    token: ${{ secrets.slack_bot_token }}
-    payload: |
-      channel: ${{ inputs.slack-channel-id }}
-      text: "Terraform drift detected in ${{ github.repository }}"
-      blocks:
-        - type: "header"
-          text:
-            type: "plain_text"
-            text: ":warning: Terraform Drift Detected"
-        - type: "section"
-          fields:
-            - type: "mrkdwn"
-              text: "*Repository:*\n${{ github.repository }}"
-            - type: "mrkdwn"
-              text: "*Environment:*\n${{ inputs.github-environment }}"
-            - type: "mrkdwn"
-              text: "*Working Directory:*\n${{ inputs.working-directory }}"
-            - type: "mrkdwn"
-              text: "*Workflow Run:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+  continue-on-error: true
+  shell: bash
+  env:
+    WEBHOOK_URL: ${{ secrets.drift_detection_webhook_url }}
+  run: |
+    curl -X POST -H 'Content-type: application/json' \
+      --fail-with-body \
+      -d '{
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": ":warning: Terraform Drift Detected"
+            }
+          },
+          {
+            "type": "section",
+            "fields": [
+              { "type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}" },
+              { "type": "mrkdwn", "text": "*Environment:*\n${{ inputs.github-environment }}" },
+              { "type": "mrkdwn", "text": "*Working Directory:*\n${{ inputs.working-directory }}" },
+              { "type": "mrkdwn", "text": "*Workflow Run:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>" }
+            ]
+          }
+        ]
+      }' \
+      "$WEBHOOK_URL"
 ```
 
 **Error Alert Message Structure (exit code 1):**
@@ -237,26 +243,33 @@ sequenceDiagram
 ```yaml
 - name: Notify Slack - Plan Error
   if: ${{ steps.drift-detect.outputs.plan-exit-code == '1' }}
-  uses: slackapi/slack-github-action@v4
-  with:
-    method: chat.postMessage
-    token: ${{ secrets.slack_bot_token }}
-    payload: |
-      channel: ${{ inputs.slack-channel-id }}
-      text: "Terraform plan failed in ${{ github.repository }}"
-      blocks:
-        - type: "header"
-          text:
-            type: "plain_text"
-            text: ":x: Terraform Plan Failed"
-        - type: "section"
-          fields:
-            - type: "mrkdwn"
-              text: "*Repository:*\n${{ github.repository }}"
-            - type: "mrkdwn"
-              text: "*Environment:*\n${{ inputs.github-environment }}"
-            - type: "mrkdwn"
-              text: "*Workflow Run:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+  continue-on-error: true
+  shell: bash
+  env:
+    WEBHOOK_URL: ${{ secrets.drift_detection_webhook_url }}
+  run: |
+    curl -X POST -H 'Content-type: application/json' \
+      --fail-with-body \
+      -d '{
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": ":x: Terraform Plan Failed"
+            }
+          },
+          {
+            "type": "section",
+            "fields": [
+              { "type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}" },
+              { "type": "mrkdwn", "text": "*Environment:*\n${{ inputs.github-environment }}" },
+              { "type": "mrkdwn", "text": "*Workflow Run:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>" }
+            ]
+          }
+        ]
+      }' \
+      "$WEBHOOK_URL"
 ```
 
 ### Component 4: Consumer Repository Integration
@@ -283,10 +296,9 @@ jobs:
       state-dynamodb-table: my-terraform-lock-table
       state-key: terraform.tfstate
       working-directory: "."
-      slack-channel-id: C0123456789
     secrets:
       account_id: ${{ secrets.ACCOUNT_ID }}
-      slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+      drift_detection_webhook_url: ${{ secrets.DRIFT_DETECTION_WEBHOOK_URL }}
 ```
 
 ## Data Models
@@ -304,7 +316,6 @@ jobs:
 | `terraform-version` | string | No | `~1.7.0` | Terraform version to install |
 | `working-directory` | string | No | `.` | Directory containing `main.tf` |
 | `tfvars-file` | string | No | `""` | Optional `.tfvars` file path |
-| `slack-channel-id` | string | Yes | — | Slack channel ID for notifications |
 | `pre-exec-script` | string | No | `""` | Optional shell script to run before Terraform |
 
 ### Workflow Secrets Schema
@@ -312,7 +323,7 @@ jobs:
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `account_id` | Yes | AWS account ID for OIDC role ARN construction |
-| `slack_bot_token` | Yes | Slack bot OAuth token with `chat:write` scope |
+| `drift_detection_webhook_url` | Yes | Slack incoming webhook URL for drift/error notifications |
 | `git_auth_token` | No | GitHub PAT for private module access during pre-exec |
 
 ### Drift Detect Action Outputs
@@ -343,7 +354,7 @@ jobs:
 | `terraform plan` exceeds 10 minutes | Step `timeout-minutes: 10` terminates the process, step is marked as failed | Req 4.7 |
 | Pre-exec script fails (non-zero exit) | Workflow terminates before init, reports pre-exec failure | Req 7.3 |
 | Pre-exec script exceeds 60 seconds | `timeout-minutes: 1` terminates script, workflow reports timeout | Req 7.4 |
-| Slack message delivery failure | `continue-on-error: true` on Slack steps ensures workflow does not fail; failure is logged | Req 5.6 |
+| Slack message delivery failure | `continue-on-error: true` on webhook notification steps ensures workflow does not fail; `curl` failure is logged | Req 5.5 |
 | Required inputs missing | GitHub Actions enforces `required: true` at `workflow_call` level; workflow will not start without them | Req 6.3 |
 
 ### Error Propagation Strategy
@@ -358,13 +369,13 @@ flowchart LR
     B -->|Slack delivery| G[Log warning, continue]
 ```
 
-The Slack notification steps use `continue-on-error: true` to ensure a Slack API outage does not mask the drift detection result. The workflow run status reflects only the Terraform operations.
+The Slack notification steps use `continue-on-error: true` to ensure a Slack webhook outage does not mask the drift detection result. The workflow run status reflects only the Terraform operations.
 
 ## Testing Strategy
 
 ### Why Property-Based Testing Does Not Apply
 
-This feature consists entirely of GitHub Actions workflow YAML and shell scripts that orchestrate external services (AWS, Terraform CLI, Slack API). There are no pure functions with varied input spaces to exercise. The behaviour is deterministic configuration — either the workflow is wired correctly or it is not. Property-based testing is inappropriate here because:
+This feature consists entirely of GitHub Actions workflow YAML and shell scripts that orchestrate external services (AWS, Terraform CLI, Slack incoming webhooks). There are no pure functions with varied input spaces to exercise. The behaviour is deterministic configuration — either the workflow is wired correctly or it is not. Property-based testing is inappropriate here because:
 
 - The feature is Infrastructure as Code (GitHub Actions YAML configuration)
 - Operations are side-effect-only (calling AWS, running CLI tools, posting to Slack)

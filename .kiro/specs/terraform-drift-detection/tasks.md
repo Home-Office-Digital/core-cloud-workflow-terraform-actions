@@ -2,98 +2,85 @@
 
 ## Overview
 
-Implement a reusable GitHub Actions workflow for detecting Terraform infrastructure drift. The drift-detect composite action already exists and handles plan execution, exit code interpretation, and step summary generation. The primary remaining work is creating the reusable workflow that orchestrates pre-exec, init, drift detection, and Slack notification, plus adding tests to validate the shell logic.
+Implement a reusable GitHub Actions workflow and supporting composite action for detecting Terraform infrastructure drift. The drift-detect composite action (`actions/drift-detect/action.yaml`) already exists with plan execution and summary logic. The remaining work is to create the reusable workflow (`drift-detection.yml`) that orchestrates pre-execution scripts, Terraform initialisation, drift detection, and Slack notification via incoming webhook.
 
 ## Tasks
 
-- [ ] 1. Create the reusable drift detection workflow
-  - [ ] 1.1 Create `.github/workflows/drift-detection.yml` with workflow_call and workflow_dispatch triggers
-    - Define `workflow_call` trigger with all inputs from Requirement 6.1 (aws-region, github-environment, role-to-assume, state-bucket, state-dynamodb-table, state-key, terraform-version, working-directory, tfvars-file, slack-channel-id, pre-exec-script)
-    - Define `workflow_dispatch` trigger with the same inputs
-    - Define secrets: `account_id` (required), `slack_bot_token` (required), `git_auth_token` (optional)
-    - Set `permissions: id-token: write` at workflow level
-    - Reference `standard-pipeline.yml` for input naming and default value conventions
-    - _Requirements: 1.2, 1.3, 2.3, 6.1, 6.2, 6.3_
+- [ ] 1. Verify and update the drift-detect composite action
+  - [ ] 1.1 Add timeout to the Terraform Plan step in `actions/drift-detect/action.yaml`
+    - Add `timeout-minutes: 10` to the "Terraform Plan (Drift Detection)" step to satisfy the 10-minute timeout requirement
+    - Verify the existing inputs, outputs, tfvars validation, exit code handling, and step summary logic match the design
+    - _Requirements: 4.7, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 8.1, 8.2, 8.3, 8.4_
 
-  - [ ] 1.2 Add the drift-detection job with checkout, pre-exec, init, and drift-detect steps
-    - Add `actions/checkout@v4` step
-    - Add conditional pre-exec script step with `timeout-minutes: 1` and `GIT_AUTH_TOKEN` env var, gated on `inputs.pre-exec-script != ''`
-    - Add Init Action step using `./actions/init` with `use-backend: true` and all relevant inputs passed through
-    - Add Drift Detect Action step using `./actions/drift-detect` with `timeout-minutes: 10`, passing working-directory, tfvars-file, and github-environment inputs
-    - _Requirements: 2.1, 2.2, 3.1, 3.4, 4.1, 4.5, 4.7, 7.1, 7.2, 7.3, 7.4_
+- [ ] 2. Create the drift-detection reusable workflow
+  - [ ] 2.1 Create `.github/workflows/drift-detection.yml` with workflow triggers, inputs, and secrets
+    - Define `workflow_call` trigger with all inputs from the Data Models section: `aws-region`, `github-environment`, `role-to-assume`, `state-bucket`, `state-dynamodb-table`, `state-key`, `terraform-version`, `working-directory`, `tfvars-file`, `pre-exec-script`
+    - Define `workflow_dispatch` trigger with the same inputs for on-demand execution
+    - Define secrets: `account_id` (required), `drift_detection_webhook_url` (required), `git_auth_token` (optional)
+    - Mark `role-to-assume` and `state-bucket` as `required: true`
+    - Set `permissions: id-token: write, contents: read`
+    - _Requirements: 1.2, 1.3, 6.1, 6.2, 6.3, 2.3_
 
-  - [ ] 1.3 Add Slack notification steps for drift and error alerts
-    - Add "Notify Slack - Drift Detected" step using `slackapi/slack-github-action@v4` with `chat.postMessage` method, conditioned on `steps.drift-detect.outputs.drift-detected == 'true'`
-    - Include Block Kit payload with header, repository, environment, working directory, and workflow run link
-    - Add "Notify Slack - Plan Error" step conditioned on `steps.drift-detect.outputs.plan-exit-code == '1'`
-    - Include Block Kit payload with header, repository, environment, and workflow run link
-    - Set `continue-on-error: true` on both Slack steps to prevent notification failures from failing the workflow
-    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
+  - [ ] 2.2 Implement the pre-execution script step
+    - Add a conditional step that runs only when `pre-exec-script` input is provided
+    - Set `timeout-minutes: 1` to enforce the 60-second limit
+    - Expose `git_auth_token` secret as an environment variable (`GITHUB_TOKEN` or `CUSTOM_GITHUB_TOKEN`) during script execution
+    - Follow the pattern from `standard-pipeline.yml` pre-exec step
+    - _Requirements: 7.1, 7.2, 7.3, 7.4_
 
-- [ ] 2. Validate and update the drift-detect composite action
-  - [ ] 2.1 Review and verify `actions/drift-detect/action.yaml` against design specifications
-    - Confirm exit code handling matches Requirements 4.2, 4.3, 4.4
-    - Confirm tfvars-file validation matches Requirement 4.6
-    - Confirm step summary output matches Requirements 8.1, 8.2, 8.3, 8.4
-    - Confirm outputs (`drift-detected`, `plan-exit-code`) are correctly exposed
-    - Make any adjustments needed to align with the design document
-    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 8.1, 8.2, 8.3, 8.4_
+  - [ ] 2.3 Integrate the Init Action step
+    - Add a step that calls `Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main`
+    - Pass all required inputs: `account_id`, `aws-region`, `github-environment`, `role-to-assume`, `state-bucket`, `state-dynamodb-table`, `state-key`, `terraform-version`, `working-directory`
+    - Set `use-backend: true` to ensure remote S3 state backend is configured
+    - _Requirements: 2.1, 2.2, 3.1, 3.2, 3.3, 3.4_
 
-- [ ] 3. Checkpoint - Validate workflow structure
-  - Ensure all YAML files are syntactically valid, ask the user if questions arise.
+  - [ ] 2.4 Integrate the Drift Detect Action step
+    - Add a step that calls `Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/drift-detect@main`
+    - Pass `working-directory`, `tfvars-file`, and `github-environment` inputs
+    - Assign step id `drift-detect` so outputs can be referenced by notification steps
+    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
 
-- [ ] 4. Add tests for drift-detect shell logic
-  - [ ]* 4.1 Set up bats-core test framework for drift-detect action
-    - Create `tests/drift-detect/` directory
-    - Add a `terraform` mock script that returns configurable exit codes
-    - Set up test helper for capturing `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` writes
-    - _Requirements: 4.1, 4.2, 4.3, 4.4_
+  - [ ] 2.5 Implement Slack notification steps using incoming webhook
+    - Add "Notify Slack - Drift Detected" step: conditional on `steps.drift-detect.outputs.drift-detected == 'true'`, uses `curl -X POST` to send Block Kit JSON payload to `drift_detection_webhook_url` secret, includes repository name, environment, working directory, and workflow run link
+    - Add "Notify Slack - Plan Error" step: conditional on `steps.drift-detect.outputs.plan-exit-code == '1'`, uses `curl -X POST` to send Block Kit JSON payload with repository name, environment, and workflow run link
+    - Both steps must use `continue-on-error: true` so Slack delivery failure does not fail the workflow
+    - Use `--fail-with-body` flag on curl to log HTTP errors
+    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-  - [ ]* 4.2 Write bats tests for plan exit code handling
-    - Test exit code 0: verify `drift-detected=false` and `plan-exit-code=0` in GITHUB_OUTPUT
-    - Test exit code 2: verify `drift-detected=true` and `plan-exit-code=2` in GITHUB_OUTPUT
-    - Test exit code 1: verify step fails and `plan-exit-code=1` in GITHUB_OUTPUT
-    - _Requirements: 4.2, 4.3, 4.4_
+- [ ] 3. Checkpoint - Verify workflow and action configuration
+  - Ensure all tests pass, ask the user if questions arise.
 
-  - [ ]* 4.3 Write bats tests for tfvars-file validation
-    - Test with non-existent tfvars-file: verify error message and exit 1
-    - Test with existing tfvars-file: verify `-var-file` flag is passed to terraform plan
-    - Test with empty tfvars-file input: verify plan runs without `-var-file` flag
-    - _Requirements: 4.5, 4.6_
-
-  - [ ]* 4.4 Write bats tests for step summary generation
-    - Test exit code 0: verify summary contains "No Drift Detected", repository, and environment
-    - Test exit code 2: verify summary contains "Drift Detected", repository, environment, and working directory
-    - Test exit code 1: verify summary contains "Plan Failed", repository, environment, and working directory
-    - _Requirements: 8.1, 8.2, 8.3, 8.4_
-
-- [ ] 5. Add workflow linting
-  - [ ]* 5.1 Add actionlint validation for workflow and action YAML files
-    - Run `actionlint` against `.github/workflows/drift-detection.yml`
-    - Run `actionlint` against `actions/drift-detect/action.yaml`
-    - Fix any schema or syntax issues reported
+- [ ] 4. Add static analysis and testing
+  - [ ] 4.1 Validate workflow files with `actionlint`
+    - Run `actionlint` against `actions/drift-detect/action.yaml` and `.github/workflows/drift-detection.yml` to verify schema compliance
+    - Fix any reported issues
     - _Requirements: 6.1, 6.2, 6.3_
 
-- [ ] 6. Create consumer repository usage example
-  - [ ] 6.1 Add usage documentation and example workflow to README or docs
-    - Create an example consumer workflow showing schedule + workflow_dispatch triggers
-    - Document all required inputs and secrets
-    - Document optional inputs with their defaults
-    - Show how to configure Slack channel ID and bot token
-    - _Requirements: 1.1, 6.1, 6.2_
+  - [ ]* 4.2 Write shell tests for drift-detect action using `bats-core`
+    - Create test file to verify exit code handling: mock `terraform plan` returning exit codes 0, 1, and 2
+    - Verify outputs `drift-detected` and `plan-exit-code` are set correctly for each scenario
+    - Test tfvars-file validation (missing file produces error, existing file passes `-var-file` flag)
+    - Test step summary content for each exit code scenario
+    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 8.1, 8.2, 8.3_
 
-- [ ] 7. Final checkpoint - Ensure all files are valid
+- [ ] 5. Create consumer repository example
+  - [ ] 5.1 Add a usage example for consumer repositories
+    - Create an example workflow snippet (in README or docs) showing how a consumer repository calls the reusable workflow with `schedule` cron trigger and `workflow_dispatch`
+    - Include example with all inputs and secrets populated
+    - _Requirements: 1.1, 1.3_
+
+- [ ] 6. Final checkpoint - Ensure all configuration is complete
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP
-- The `actions/drift-detect/action.yaml` already exists with the core implementation — task 2.1 is a verification/alignment pass
-- The primary implementation effort is in task 1 (creating the reusable workflow)
-- Slack notification uses `slackapi/slack-github-action@v4` with `chat.postMessage` method and Block Kit formatting
-- The design explicitly states property-based testing is not applicable for this IaC feature
-- Shell tests use `bats-core` framework to validate exit code handling in isolation
-- `actionlint` provides static analysis for GitHub Actions YAML schema compliance
+- The `actions/drift-detect/action.yaml` already exists with most of the required logic; task 1.1 only adds the missing timeout
+- This feature is Infrastructure as Code (GitHub Actions YAML) — no property-based tests apply
+- Slack notification uses `curl` to POST to an incoming webhook URL (`drift_detection_webhook_url` secret) — no bot token, no channel ID input needed
+- The workflow follows patterns established by `standard-pipeline.yml` for pre-exec and init steps
+- Each task references specific requirements for traceability
+- Checkpoints ensure incremental validation
 
 ## Task Dependency Graph
 
@@ -101,11 +88,11 @@ Implement a reusable GitHub Actions workflow for detecting Terraform infrastruct
 {
   "waves": [
     { "id": 0, "tasks": ["1.1", "2.1"] },
-    { "id": 1, "tasks": ["1.2"] },
-    { "id": 2, "tasks": ["1.3"] },
-    { "id": 3, "tasks": ["4.1", "5.1"] },
-    { "id": 4, "tasks": ["4.2", "4.3", "4.4"] },
-    { "id": 5, "tasks": ["6.1"] }
+    { "id": 1, "tasks": ["2.2", "2.3"] },
+    { "id": 2, "tasks": ["2.4"] },
+    { "id": 3, "tasks": ["2.5"] },
+    { "id": 4, "tasks": ["4.1", "4.2"] },
+    { "id": 5, "tasks": ["5.1"] }
   ]
 }
 ```

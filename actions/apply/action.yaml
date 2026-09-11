@@ -10,6 +10,11 @@ inputs:
     required: false
     default: 'main'
     type: string
+  artifact-name:
+    description: 'Name of the plan artifact to download. Defaults to terraform-plan-file-<github-environment>. Must match the artifact-name given to actions/plan.'
+    required: false
+    default: ''
+    type: string
   aws-region:
     description: 'AWS Region for the State Bucket and Resources'
     default: eu-west-2
@@ -20,9 +25,34 @@ inputs:
     required: false
     default: 'placeholder'
     type: string
+  github-token:
+    description: 'Token used to read the plan artifact from another workflow run. Required when plan-run-id is set, and needs actions:read on this repository. Ignored otherwise.'
+    required: false
+    default: ''
+    type: string
+  plan-run-id:
+    description: 'Workflow run ID to download the plan artifact from. Leave unset to download from the run this action is executing in, which is the default behaviour. Requires github-token when set.'
+    required: false
+    default: ''
+    type: string
   role-to-assume:
     description: 'AWS Role name for OIDC'
     required: true
+    type: string
+  state-bucket:
+    description: 'Name of the S3 bucket for Terraform State. Set this only when the apply runs in a job that has not already run terraform init; supplying it makes this action run its own init. Leave unset to keep the existing behaviour of applying with whatever this job already initialised.'
+    required: false
+    default: ''
+    type: string
+  state-dynamodb-table:
+    description: 'Name of the DynamoDB table. Only read when state-bucket is set.'
+    required: false
+    default: ''
+    type: string
+  state-key:
+    description: 'Where you want the state key to be. Only read when state-bucket is set.'
+    required: false
+    default: 'terraform.tfstate'
     type: string
   terraform-version:
     description: 'Terraform version to use'
@@ -44,11 +74,35 @@ runs:
         terraform_version: ${{ inputs.terraform-version }}
         terraform_wrapper: false
 
+    # Reading an artifact from another run needs both run-id and a token, so say which
+    # one is missing rather than letting the download fail as artifact-not-found.
+    - name: Check Cross-Run Download Inputs
+      if: inputs.plan-run-id != '' && inputs.github-token == ''
+      shell: bash
+      env:
+        PLAN_RUN_ID: ${{ inputs.plan-run-id }}
+      run: |
+        set -euo pipefail
+        echo "plan-run-id is set to '${PLAN_RUN_ID}' but github-token is empty." >&2
+        echo "Downloading a plan artifact from another workflow run needs both." >&2
+        echo "The token needs actions:read on this repository." >&2
+        exit 1
+
     - name: Download Plan File
+      if: inputs.plan-run-id == ''
       uses: actions/download-artifact@v4
       with:
-        name: terraform-plan-file-${{ inputs.github-environment }}
+        name: ${{ inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
         path: ${{ inputs.working-directory }}
+
+    - name: Download Plan File From Earlier Run
+      if: inputs.plan-run-id != ''
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
+        path: ${{ inputs.working-directory }}
+        run-id: ${{ inputs.plan-run-id }}
+        github-token: ${{ inputs.github-token }}
 
     - uses: aws-actions/configure-aws-credentials@v4
       name: Configure AWS IdP Credentials
@@ -57,6 +111,33 @@ runs:
         retry-max-attempts: 5
         role-session-name: GitHubActions
         role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role-to-assume }}
+
+    # Only runs when state-bucket is supplied. Without it this action applies with
+    # whatever the surrounding job already initialised, which is the existing behaviour.
+    - name: Terraform Init
+      if: inputs.state-bucket != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STATE_BUCKET: ${{ inputs.state-bucket }}
+        STATE_DYNAMODB_TABLE: ${{ inputs.state-dynamodb-table }}
+        STATE_KEY: ${{ inputs.state-key }}
+        STATE_REGION: ${{ inputs.aws-region }}
+      run: |
+        set -euo pipefail
+
+        init_args=(
+          -input=false
+          -backend-config="bucket=${STATE_BUCKET}"
+          -backend-config="key=${STATE_KEY}"
+          -backend-config="region=${STATE_REGION}"
+        )
+
+        if [ -n "${STATE_DYNAMODB_TABLE}" ]; then
+          init_args+=(-backend-config="dynamodb_table=${STATE_DYNAMODB_TABLE}")
+        fi
+
+        terraform init "${init_args[@]}"
 
     - name: Terraform Apply
       shell: bash

@@ -5,6 +5,11 @@ inputs:
   account_id:
     description: "AWS Account ID"
     required: true
+  artifact-name:
+    description: 'Name to upload the plan artifact under. Defaults to terraform-plan-file-<github-environment>. Set this to include a component element when a repository has more than one Terraform root.'
+    required: false
+    default: ''
+    type: string
   aws-region:
     description: 'AWS Region for the State Bucket and Resources'
     default: eu-west-2
@@ -14,6 +19,11 @@ inputs:
     description: 'The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also.'
     required: false
     default: 'placeholder'
+    type: string
+  retention-days:
+    description: 'Days to retain the plan artifact. Raise this when the apply runs in a later workflow run than the plan.'
+    required: false
+    default: '1'
     type: string
   role-to-assume:
     description: 'AWS Role name for OIDC'
@@ -64,7 +74,7 @@ runs:
     - name: Upload Plan File
       uses: actions/upload-artifact@v4
       with:
-        name: terraform-plan-file-${{ inputs.github-environment }}
+        name: ${{ inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
         path: |
           ${{ inputs.working-directory }}/tfplan
-        retention-days: 1
+        retention-days: ${{ inputs.retention-days }}

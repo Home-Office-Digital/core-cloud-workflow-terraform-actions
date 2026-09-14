@@ -188,8 +188,8 @@ runs:
           -Dsonar.test.inclusions=tests/**/*.tftest.hcl
           -Dsonar.test.exclusions=tests/sonar_test_anchor.py
           -Dsonar.text.inclusions=tests/**/*.tftest.hcl
-          -Dsonar.testExecutionReportPaths=${{ github.workspace }}/sonar-test-results.xml,${{ github.workspace }}/${{ inputs.test-directory }}/sonar-test-results.xml
-          -Dsonar.coverageReportPaths=${{ github.workspace }}/sonar-coverage.xml,${{ github.workspace }}/${{ inputs.test-directory }}/sonar-coverage.xml
+          -Dsonar.testExecutionReportPaths=${{ github.workspace }}/sonar-test-results.xml,${{ github.workspace }}/${{ inputs.working-directory }}/${{ inputs.test-directory }}/sonar-test-results.xml
+          -Dsonar.coverageReportPaths=${{ github.workspace }}/sonar-coverage.xml,${{ github.workspace }}/${{ inputs.working-directory }}/${{ inputs.test-directory }}/sonar-coverage.xml
       env:
         SONAR_TOKEN: ${{ inputs.sonar-token }}
         SONAR_HOST_URL: ${{ inputs.sonar-host-url }}

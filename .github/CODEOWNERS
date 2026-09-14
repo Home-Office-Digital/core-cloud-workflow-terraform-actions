@@ -1,2 +1,5 @@
+# Default ownership for the repository.
+* @Home-Office-Digital/core-cloud-developer-tooling
 
-* @Home-Office-Digital/core-cloud-sauron
+# Reusable Terraform actions/workflows — owned by Core Cloud Developer Tooling.
+/.github/workflows/ @Home-Office-Digital/core-cloud-developer-tooling

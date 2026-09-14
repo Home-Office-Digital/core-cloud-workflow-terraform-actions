@@ -64,11 +64,11 @@ runs:
       run: |
         # Use absolute paths so the Sonar scanner can always find the reports at repo root
         if [ -n "${{ inputs.test-directory }}" ]; then
-          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.test-directory }}/test-results.xml"
+          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.working-directory }}/${{ inputs.test-directory }}/test-results.xml"
           OUT_FILE="$GITHUB_WORKSPACE/sonar-test-results.xml"
-          FALLBACK_COPY_DIR="$GITHUB_WORKSPACE/${{ inputs.test-directory }}"
+          FALLBACK_COPY_DIR="$GITHUB_WORKSPACE/${{ inputs.working-directory }}/${{ inputs.test-directory }}"
         else
-          IN_FILE="$GITHUB_WORKSPACE/test-results.xml"
+          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.working-directory }}/test-results.xml"
           OUT_FILE="$GITHUB_WORKSPACE/sonar-test-results.xml"
           FALLBACK_COPY_DIR=""
         fi
@@ -86,11 +86,11 @@ runs:
       run: |
         # Use absolute paths so the Sonar scanner can always find the reports at repo root
         if [ -n "${{ inputs.test-directory }}" ]; then
-          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.test-directory }}/test-results.xml"
+          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.working-directory }}/${{ inputs.test-directory }}/test-results.xml"
           OUT_FILE="$GITHUB_WORKSPACE/sonar-coverage.xml"
-          FALLBACK_COPY_DIR="$GITHUB_WORKSPACE/${{ inputs.test-directory }}"
+          FALLBACK_COPY_DIR="$GITHUB_WORKSPACE/${{ inputs.working-directory }}/${{ inputs.test-directory }}"
         else
-          IN_FILE="$GITHUB_WORKSPACE/test-results.xml"
+          IN_FILE="$GITHUB_WORKSPACE/${{ inputs.working-directory }}/test-results.xml"
           OUT_FILE="$GITHUB_WORKSPACE/sonar-coverage.xml"
           FALLBACK_COPY_DIR=""
         fi
@@ -153,7 +153,7 @@ runs:
       run: |
         # Try to copy sonar reports from the test-directory (if provided) into the repo root
         if [ -n "${{ inputs.test-directory }}" ]; then
-          SRC_TEST_DIR="${{ github.workspace }}/${{ inputs.test-directory }}"
+          SRC_TEST_DIR="${{ github.workspace }}/${{ inputs.working-directory }}/${{ inputs.test-directory }}"
           if [ -f "$SRC_TEST_DIR/sonar-test-results.xml" ]; then
             cp "$SRC_TEST_DIR/sonar-test-results.xml" "$GITHUB_WORKSPACE/sonar-test-results.xml" || true
           fi

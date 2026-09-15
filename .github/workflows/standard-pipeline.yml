@@ -8,6 +8,11 @@ on:
         required: false
         default: "main"
         type: string
+      artifact-name:
+        description: "Name of the plan artifact. Defaults to terraform-plan-file-<github-environment>. Set this to include a component element when a repository has more than one Terraform root."
+        required: false
+        default: ""
+        type: string
       aws-region:
         description: "AWS Region for the State Bucket and Resources"
         default: eu-west-2
@@ -22,6 +27,16 @@ on:
         description: "The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also."
         required: false
         default: "placeholder"
+        type: string
+      plan-run-id:
+        description: "Workflow run ID to download the plan artifact from. Leave unset to apply the plan produced by this run, which is the default behaviour. Requires the plan_artifact_token secret when set."
+        required: false
+        default: ""
+        type: string
+      retention-days:
+        description: "Days to retain the plan artifact. Raise this when the apply runs in a later workflow run than the plan."
+        required: false
+        default: "1"
         type: string
       role-to-assume:
         description: "AWS Role name for OIDC"
@@ -82,6 +97,9 @@ on:
       github_app_client_id:
         required: false
       github_app_private_key:
+        required: false
+      plan_artifact_token:
+        description: "Token used to read the plan artifact from another workflow run. Only needed when plan-run-id is set, and needs actions:read on this repository."
         required: false
 
 permissions:
@@ -186,8 +204,10 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
+          artifact-name: ${{ inputs.artifact-name }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
+          retention-days: ${{ inputs.retention-days }}
           role-to-assume: ${{ inputs.role-to-assume }}
           terraform-version: ${{ inputs.terraform-version }}
           tfvars-file: ${{ inputs.tfvars-file }}
@@ -200,8 +220,17 @@ jobs:
         with:
           apply-branch: ${{ inputs.apply-branch }}
           account_id: ${{ secrets.ACCOUNT_ID }}
+          artifact-name: ${{ inputs.artifact-name }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
+          github-token: ${{ secrets.plan_artifact_token }}
+          plan-run-id: ${{ inputs.plan-run-id }}
           role-to-assume: ${{ inputs.role-to-assume }}
+          # This job always runs actions/init before the apply, so the apply must not
+          # run its own init on the default path. These reach the action only on the
+          # cross-run path, where the plan being applied was not produced by this run.
+          state-bucket: ${{ inputs.plan-run-id != '' && inputs.state-bucket || '' }}
+          state-dynamodb-table: ${{ inputs.plan-run-id != '' && inputs.state-dynamodb-table || '' }}
+          state-key: ${{ inputs.plan-run-id != '' && inputs.state-key || '' }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}

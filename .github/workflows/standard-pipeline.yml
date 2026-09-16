@@ -51,11 +51,21 @@ on:
         required: false
         default: ""
         type: string
+      state-encrypt:
+        description: "Whether to pass encrypt to the S3 backend as -backend-config. Accepts 'true' or 'false'. Leave unset to omit the argument entirely, which is the existing behaviour."
+        required: false
+        default: ""
+        type: string
       state-key:
         description: "Where you want the state key to be"
         required: false
         type: string
         default: "terraform.tfstate"
+      state-use-lockfile:
+        description: "Whether to pass use_lockfile to the S3 backend as -backend-config, which enables S3 native state locking. Accepts 'true' or 'false'. Leave unset to omit the argument entirely, which is the existing behaviour."
+        required: false
+        default: ""
+        type: string
       terraform-version:
         description: "Terraform version to use"
         required: false
@@ -164,7 +174,9 @@ jobs:
           role-to-assume: ${{ inputs.role-to-assume }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
+          state-encrypt: ${{ inputs.state-encrypt }}
           state-key: ${{ inputs.state-key }}
+          state-use-lockfile: ${{ inputs.state-use-lockfile }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}
           use-backend: ${{ inputs.use-backend }}
@@ -231,6 +243,8 @@ jobs:
           # cross-run path, where the plan being applied was not produced by this run.
           state-bucket: ${{ inputs.plan-run-id != '' && inputs.state-bucket || '' }}
           state-dynamodb-table: ${{ inputs.plan-run-id != '' && inputs.state-dynamodb-table || '' }}
+          state-encrypt: ${{ inputs.plan-run-id != '' && inputs.state-encrypt || '' }}
           state-key: ${{ inputs.plan-run-id != '' && inputs.state-key || '' }}
+          state-use-lockfile: ${{ inputs.plan-run-id != '' && inputs.state-use-lockfile || '' }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}

@@ -49,10 +49,20 @@ inputs:
     required: false
     default: ''
     type: string
+  state-encrypt:
+    description: "Whether to pass encrypt to the S3 backend as -backend-config. Accepts 'true' or 'false'. Only read when state-bucket is set. Leave unset to omit the argument entirely."
+    required: false
+    default: ''
+    type: string
   state-key:
     description: 'Where you want the state key to be. Only read when state-bucket is set.'
     required: false
     default: 'terraform.tfstate'
+    type: string
+  state-use-lockfile:
+    description: "Whether to pass use_lockfile to the S3 backend as -backend-config, which enables S3 native state locking. Accepts 'true' or 'false'. Only read when state-bucket is set. Leave unset to omit the argument entirely."
+    required: false
+    default: ''
     type: string
   terraform-version:
     description: 'Terraform version to use'
@@ -121,10 +131,26 @@ runs:
       env:
         STATE_BUCKET: ${{ inputs.state-bucket }}
         STATE_DYNAMODB_TABLE: ${{ inputs.state-dynamodb-table }}
+        STATE_ENCRYPT: ${{ inputs.state-encrypt }}
         STATE_KEY: ${{ inputs.state-key }}
         STATE_REGION: ${{ inputs.aws-region }}
+        STATE_USE_LOCKFILE: ${{ inputs.state-use-lockfile }}
       run: |
         set -euo pipefail
+
+        # Checked against an exact allow-list so a malformed value fails here, naming the
+        # input, rather than reaching terraform as an unparseable backend argument.
+        for pair in "state-encrypt:${STATE_ENCRYPT}" "state-use-lockfile:${STATE_USE_LOCKFILE}"; do
+          name="${pair%%:*}"
+          value="${pair#*:}"
+          case "${value}" in
+            "" | true | false) ;;
+            *)
+              echo "${name} must be 'true', 'false' or unset; got '${value}'." >&2
+              exit 1
+              ;;
+          esac
+        done
 
         init_args=(
           -input=false
@@ -135,6 +161,14 @@ runs:
 
         if [ -n "${STATE_DYNAMODB_TABLE}" ]; then
           init_args+=(-backend-config="dynamodb_table=${STATE_DYNAMODB_TABLE}")
+        fi
+
+        if [ -n "${STATE_ENCRYPT}" ]; then
+          init_args+=(-backend-config="encrypt=${STATE_ENCRYPT}")
+        fi
+
+        if [ -n "${STATE_USE_LOCKFILE}" ]; then
+          init_args+=(-backend-config="use_lockfile=${STATE_USE_LOCKFILE}")
         fi
 
         terraform init "${init_args[@]}"

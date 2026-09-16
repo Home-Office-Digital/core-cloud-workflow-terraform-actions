@@ -28,11 +28,21 @@ inputs:
     required: false
     default: ""
     type: string
+  state-encrypt:
+    description: "Whether to pass encrypt to the S3 backend as -backend-config. Accepts 'true' or 'false'. Leave unset to omit the argument entirely, which is the existing behaviour."
+    required: false
+    default: ""
+    type: string
   state-key:
     description: "Where you want the state key to be"
     required: false
     type: string
     default: "terraform.tfstate"
+  state-use-lockfile:
+    description: "Whether to pass use_lockfile to the S3 backend as -backend-config, which enables S3 native state locking. Accepts 'true' or 'false'. Leave unset to omit the argument entirely, which is the existing behaviour. Terraform supports this alongside dynamodb_table so a migration can be staged."
+    required: false
+    default: ""
+    type: string
   terraform-version:
     description: "Terraform version to use"
     required: false
@@ -114,8 +124,28 @@ runs:
     - name: Terraform Init
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        STATE_ENCRYPT: ${{ inputs.state-encrypt }}
+        STATE_USE_LOCKFILE: ${{ inputs.state-use-lockfile }}
       run: |
         export TF_PLUGIN_CACHE_DIR=""
+
+        # Both new inputs are booleans forwarded to -backend-config. They arrive through
+        # env: and are checked against an exact allow-list rather than interpolated,
+        # because the argument string below is built for `eval`: a value carrying a quote
+        # could otherwise alter the command. 'true', 'false' or unset is the whole
+        # representable set, which is all a boolean backend argument needs.
+        for pair in "state-encrypt:${STATE_ENCRYPT}" "state-use-lockfile:${STATE_USE_LOCKFILE}"; do
+          name="${pair%%:*}"
+          value="${pair#*:}"
+          case "${value}" in
+            "" | true | false) ;;
+            *)
+              echo "${name} must be 'true', 'false' or unset; got '${value}'." >&2
+              exit 1
+              ;;
+          esac
+        done
 
         if [ "${{ inputs.use-backend }}" = "true" ]; then
           echo "Running full init with backend..."
@@ -132,6 +162,17 @@ runs:
 
           if [ -n "${{ inputs.state-dynamodb-table }}" ]; then
             INIT_OPTS="$INIT_OPTS -backend-config='dynamodb_table=${{ inputs.state-dynamodb-table }}'"
+          fi
+
+          # Appended only when set, so a caller passing neither reaches exactly the
+          # command line this action built before. Both sit inside the use-backend branch
+          # because there is no backend to configure when -backend=false.
+          if [ -n "${STATE_ENCRYPT}" ]; then
+            INIT_OPTS="$INIT_OPTS -backend-config='encrypt=${STATE_ENCRYPT}'"
+          fi
+
+          if [ -n "${STATE_USE_LOCKFILE}" ]; then
+            INIT_OPTS="$INIT_OPTS -backend-config='use_lockfile=${STATE_USE_LOCKFILE}'"
           fi
 
         else

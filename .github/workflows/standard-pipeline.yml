@@ -19,6 +19,10 @@ on:
           Requires the plan_artifact_token secret, which needs actions:read. Defaults
           false, which leaves artefact naming and the same-run apply on push exactly as
           they are today.
+
+          Note for anyone who already works around the naming: this appends the head SHA
+          to artifact-name itself, so a caller that appends it too ends up with the SHA
+          twice. Pass the prefix only.
         required: false
         default: false
         type: boolean

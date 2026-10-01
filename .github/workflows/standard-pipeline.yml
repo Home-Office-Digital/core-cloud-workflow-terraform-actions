@@ -194,7 +194,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@chore/resolve-reviewed-plan-integration
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           aws-region: ${{ inputs.aws-region }}
@@ -211,14 +211,14 @@ jobs:
 
       - name: Terraform Fmt
         id: quality-checks
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@chore/resolve-reviewed-plan-integration
         with:
           working-directory: ${{ inputs.working-directory }}
           recursive: ${{ inputs.fmt-recursive }}
 
       - name: Terraform Validate
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@chore/resolve-reviewed-plan-integration
         with:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -232,7 +232,7 @@ jobs:
 
       - name: Terraform Test
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@chore/resolve-reviewed-plan-integration
         with:
           working-directory: ${{ inputs.working-directory }}
           sonar-host-url: ${{ secrets.sonar_host_url }}
@@ -251,7 +251,7 @@ jobs:
           && !(inputs.apply-reviewed-plan && github.event_name == 'pull_request'
           && github.event.action == 'closed') }}
         id: plan
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@chore/resolve-reviewed-plan-integration
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
           # With apply-reviewed-plan the name gains the pull request head SHA so a later
@@ -278,7 +278,7 @@ jobs:
           && github.event.pull_request.merged
           && github.event.pull_request.base.ref == inputs.apply-branch }}
         id: resolve-plan
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/resolve-plan@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/resolve-plan@chore/resolve-reviewed-plan-integration
         with:
           artefact-name-prefix: ${{ inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
           head-sha: ${{ github.event.pull_request.head.sha }}
@@ -299,7 +299,7 @@ jobs:
           && github.event.pull_request.base.ref == inputs.apply-branch)
           || (!inputs.apply-reviewed-plan && github.ref_name == inputs.apply-branch)) }}
         id: apply
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@chore/resolve-reviewed-plan-integration
         with:
           apply-branch: ${{ inputs.apply-branch }}
           account_id: ${{ secrets.ACCOUNT_ID }}

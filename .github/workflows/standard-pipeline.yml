@@ -10,11 +10,15 @@ on:
         type: string
       apply-reviewed-plan:
         description: >-
-          Apply the plan reviewed on the pull request rather than one generated on this
-          push. When true the plan artefact name gains the pull request head SHA, and on a
-          push to apply-branch the pipeline resolves that artefact and applies it. Requires
-          the plan_artifact_token secret, which needs actions:read. Defaults false, which
-          leaves artefact naming and the same-run apply exactly as they are today.
+          Apply the plan reviewed on the pull request rather than one generated at apply
+          time. When true the plan artefact name gains the pull request head SHA, and the
+          apply moves from `push` to the merge itself: the caller must trigger on
+          `pull_request` with `types: [closed]`, and the apply runs when that pull request
+          merged into apply-branch. A push to apply-branch then does NOT apply, because a
+          commit that arrived without a pull request has no reviewed plan to apply.
+          Requires the plan_artifact_token secret, which needs actions:read. Defaults
+          false, which leaves artefact naming and the same-run apply on push exactly as
+          they are today.
         required: false
         default: false
         type: boolean
@@ -148,6 +152,20 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          # On a pull_request `closed` event the default ref is refs/pull/N/merge, and
+          # GitHub deletes that ref when the pull request closes — checked against this
+          # organisation: a merged pull request keeps refs/pull/N/head and has no
+          # refs/pull/N/merge, and neither does one closed unmerged. The default checkout
+          # would be fetching a ref that is being deleted underneath it. Pinning to the
+          # head SHA uses the ref that survives, and gives init the tree the reviewed plan
+          # was produced from. Empty on every other path, and `ref` has no default — the
+          # action cannot tell an empty input from an absent one — so this is a no-op for
+          # every existing caller.
+          ref: >-
+            ${{ (inputs.apply-reviewed-plan && github.event_name == 'pull_request'
+            && github.event.action == 'closed' && github.event.pull_request.merged)
+            && github.event.pull_request.head.sha || '' }}
 
       - name: Use github appid and key
         if: ${{ env.GITHUB_APP_CLIENT_ID != '' && env.GITHUB_APP_PRIVATE_KEY != '' }}
@@ -220,8 +238,18 @@ jobs:
           sonar-host-url: ${{ secrets.sonar_host_url }}
           sonar-token: ${{ secrets.sonar_token }}
 
+      # Not when a pull request closes and a reviewed plan is being resolved. That run
+      # shares the pull request's head SHA, so a plan uploaded here would carry the same
+      # artefact name as the reviewed one and could be resolved in its place — a plan
+      # generated after review, applied as though it were the reviewed one. resolve-plan
+      # also refuses to resolve to its own run, so this is the first of two independent
+      # guards. Keyed on `closed` rather than on `merged`, because planning as a pull
+      # request closes has no value either way and the looser condition leaves no gap.
       - name: Terraform Plan
-        if: ${{ inputs.use-backend == true }}
+        if: >-
+          ${{ inputs.use-backend == true
+          && !(inputs.apply-reviewed-plan && github.event_name == 'pull_request'
+          && github.event.action == 'closed') }}
         id: plan
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
@@ -238,24 +266,38 @@ jobs:
           tfvars-file: ${{ inputs.tfvars-file }}
           working-directory: ${{ inputs.working-directory }}
 
-      # Converts the merged commit back to the pull request head SHA and finds that run's
-      # plan artefact. Only on the apply path, and only when asked for. On failure it fails
-      # with no outputs, so the apply below is skipped rather than falling back to the fresh
-      # plan this feature exists to stop applying.
+      # Finds the plan run for the pull request's head commit and the artefact in it. Only
+      # when asked for, and only on the merge of a pull request into apply-branch — the
+      # event whose payload carries the head SHA, which is why no merge-commit archaeology
+      # is needed. On failure it fails with no outputs, so the apply below is skipped rather
+      # than falling back to the fresh plan this feature exists to stop applying.
       - name: Resolve Reviewed Plan
-        if: ${{ inputs.apply-reviewed-plan && inputs.use-backend == true && github.ref_name == inputs.apply-branch }}
+        if: >-
+          ${{ inputs.use-backend == true && inputs.apply-reviewed-plan
+          && github.event_name == 'pull_request' && github.event.action == 'closed'
+          && github.event.pull_request.merged
+          && github.event.pull_request.base.ref == inputs.apply-branch }}
         id: resolve-plan
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/resolve-plan@main
         with:
           artefact-name-prefix: ${{ inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
-          merge-sha: ${{ github.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
           # This job's permissions are contents / pull-requests / id-token, so its own
           # GITHUB_TOKEN cannot read another run's artefacts. The same secret actions/apply
           # already uses for the cross-run download serves here.
           github-token: ${{ secrets.plan_artifact_token }}
 
+      # Two mutually exclusive paths. Opted in, the apply happens on the merge, so a direct
+      # push to apply-branch applies nothing — it has no reviewed plan, and silently
+      # applying a fresh one is the behaviour this removes. Not opted in, this is the
+      # existing push gate unchanged.
       - name: Terraform Apply
-        if: ${{ inputs.use-backend == true && github.ref_name == inputs.apply-branch }}
+        if: >-
+          ${{ inputs.use-backend == true
+          && ((inputs.apply-reviewed-plan && github.event_name == 'pull_request'
+          && github.event.action == 'closed' && github.event.pull_request.merged
+          && github.event.pull_request.base.ref == inputs.apply-branch)
+          || (!inputs.apply-reviewed-plan && github.ref_name == inputs.apply-branch)) }}
         id: apply
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
         with:

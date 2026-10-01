@@ -1,91 +1,77 @@
-# `resolve-plan` — find the plan artefact a reviewer approved, from the commit that merged.
+# `resolve-plan` — find the plan artefact a reviewer approved on the pull request.
 #
 # Used by `standard-pipeline.yml` when `apply-reviewed-plan: true`, ahead of the
-# `Terraform Apply` step. Its outputs are what turn a merge into an apply of the reviewed
-# plan rather than a freshly generated one.
+# `Terraform Apply` step, so a merge applies the reviewed plan rather than a fresh one.
 #
 # ## The problem
 #
-# The plan a reviewer reads is produced on the pull request run. The apply happens on a
-# separate `push` run. Nothing carries the plan across, so `actions/apply` on the default
-# path downloads a plan uploaded seconds earlier in its own job — generated after review,
-# not the one reviewed.
-#
+# The plan a reviewer reads is produced on the pull request run; the apply runs separately.
+# Nothing carries the plan across, so `actions/apply` on the default path downloads a plan
+# uploaded seconds earlier in its own job — generated after review, not the one reviewed.
 # #27 gave `actions/apply` the ability to apply a plan from an earlier run via
-# `plan-run-id`. It did not give the pipeline any way to work out which run that is. This
-# action is that missing half.
+# `plan-run-id`, but nothing works out which run that is. This action is that missing half.
 #
-# ## Why the obvious lookup does not work
+# ## Trigger on the merge, not on the push
+#
+# An earlier draft ran on `push` to `main` and worked backwards from the merge commit,
+# because a `push` does not know which pull request produced it. The head SHA is
+# unrecoverable from `github.sha` under every permitted merge method — merge commit, squash
+# and rebase all produce a commit that differs from the pull request head — so it meant
+# `GET /commits/{sha}/pulls`, which returns *every* pull request associated with a commit
+# in an undocumented order, and a tiered rule to choose between them.
+#
+# None of that is necessary. `pull_request` with `types: [closed]` and
+# `if: github.event.pull_request.merged` fires on the merge and carries
+# `github.event.pull_request.head.sha` in the payload: the head SHA arrives as a fact
+# rather than an inference, and the merge method stops mattering. This is the pattern
+# already in production in `core-cloud-lza-management-bootstrap`
+# (`.github/workflows/merge-apply.yaml`); adopting it deleted most of this action.
+#
+# What remains is the part the payload does not carry — the run id, which
+# `actions/download-artifact` cannot do without and which no API derives from an artefact
+# name:
 #
 # ```text
-# GET /actions/runs?head_sha=<github.sha>        # finds nothing
+# github.event.pull_request.head.sha
+#   → GET /repos/{owner}/{repo}/actions/runs?head_sha=…     → the plan run
+#   → GET /repos/{owner}/{repo}/actions/runs/{id}/artifacts  → the artefact
 # ```
 #
-# | Merge method | What lands | Merge SHA vs pull request head SHA |
-# | ------------ | ---------- | ---------------------------------- |
-# | Merge commit | a new two-parent commit | **differ** |
-# | Squash       | one new combined commit | **differ** |
-# | Rebase       | commits replayed onto the new base | **differ** — every commit is rewritten |
+# Each candidate run is asked for the artefact by exact name. Filtering runs on their
+# workflow `name` instead would hard-code a string every consumer sets differently, and
+# would not separate two Terraform roots planning in one workflow. `?name=` is an exact
+# server-side match, verified positively and negatively against this repository.
 #
-# All three differ, so the artefact — keyed on the pull request head SHA, because that is
-# the commit the reviewed plan was produced from — is unreachable from `github.sha`. Going
-# via the pull request works for all three, because GitHub records the association whatever
-# the method did to commit identity:
+# ## What it does not decide
 #
-# ```text
-# github.sha (the merged commit)
-#   → GET /repos/{owner}/{repo}/commits/{sha}/pulls        → pull request, head SHA
-#   → GET /repos/{owner}/{repo}/actions/runs?head_sha=…    → the plan run
-#   → GET /repos/{owner}/{repo}/actions/runs/{id}/artifacts → the artefact
-# ```
+# Whether the plan still applies is Terraform's call, not this action's: a saved plan
+# records the state lineage and serial it was produced against, and
+# `terraform apply <planfile>` compares both against the latest snapshot and refuses,
+# having changed nothing, if either has moved. That gate reads real state rather than
+# inferring from commits.
 #
-# ## Selecting the pull request, which is not `.[0]`
-#
-# `GET /commits/{sha}/pulls` returns **every** pull request associated with the commit, not
-# only the one that merged it: the one whose merge produced it, one whose *head* happens to
-# be that commit, and any whose branch contains it. Six came back for a single commit while
-# this was being developed.
-#
-# The response order is not documented, so taking the first element is not merely wrong, it
-# is inconsistently wrong — and the wrong pull request resolves a plan produced for a
-# different change. Selection is therefore an explicit tiered rule:
-#
-# 1. the merged pull request whose `merge_commit_sha` is this commit — the exact rule;
-# 2. failing that, the sole merged candidate — the narrow rebase case, reported as a
-#    weaker inference via the `resolution` output and a step warning;
-# 3. failing that, **fail**. Picking between candidates would be a guess.
-#
-# ## It decides which plan, not whether that plan still applies
-#
-# This action makes no staleness judgement. Terraform makes that one: a saved plan records
-# the state lineage and serial it was produced against, and `terraform apply <planfile>`
-# compares both against the latest snapshot and refuses — having changed nothing — if
-# either has moved. That gate runs against real state rather than an inference about
-# commits, and it fails closed.
-#
-# ## It fails closed, with no outputs
+# ## It fails closed
 #
 # Every failure path writes **no step outputs at all**. An empty `plan-run-id` would send
 # `actions/apply` back to its same-run download path and apply a plan nobody reviewed,
-# which is the behaviour this exists to remove. The action also never re-plans.
+# which is the behaviour this exists to remove. It also never re-plans, and refuses to
+# resolve to the run it is executing in.
 #
 # ## Permissions required of the calling workflow
 #
 # ```yaml
 # permissions:
-#   contents: read       # GET /commits/{sha}/pulls
-#   pull-requests: read  # the pull request objects it returns
-#   actions: read        # GET /actions/runs and .../artifacts
+#   actions: read   # GET /actions/runs and .../artifacts
 # ```
 #
-# No write permission is needed. Note that `standard-pipeline.yml` does not currently
-# declare `actions`, which is why it passes the `plan_artifact_token` secret through
-# instead — see the pull request that introduced this.
+# One scope, down from three now the pull request lookup is gone. `standard-pipeline.yml`
+# does not declare `actions`, which is why it passes the `plan_artifact_token` secret
+# through instead — see the pull request that introduced this.
 
 name: Resolve reviewed plan
 description: >-
-  Resolve the plan artefact a reviewer approved from the commit that merged, so an apply can
-  use it instead of generating a new plan. Works under merge, squash and rebase.
+  Resolve the plan artefact a reviewer approved on the pull request, so a merge can apply it
+  instead of generating a new plan. Takes the head SHA from the `pull_request` payload.
 
 inputs:
   artefact-name-prefix:
@@ -95,18 +81,19 @@ inputs:
       name the same way from the same value. `standard-pipeline.yml` passes its
       `artifact-name` input here.
     required: true
-  merge-sha:
+  head-sha:
     description: >-
-      The commit being applied — `${{ github.sha }}` on a `push`. The merge commit, not the
-      pull request head; converting one to the other is what this action does. A full
-      40-character SHA is expected; a unique prefix of at least 7 characters is accepted for
-      manual invocation.
+      The pull request head SHA — `${{ github.event.pull_request.head.sha }}`. The commit
+      the reviewed plan was produced from, and the commit the artefact is named for. The
+      payload of a `pull_request` event carries it directly, so it is taken rather than
+      inferred. A full 40-character lower- or upper-case hex SHA is required; anything else
+      is refused, because a short or absent value composes a name no publish job ever used.
     required: true
   github-token:
     description: >-
-      Token for the three read calls, needing `contents: read`, `pull-requests: read` and
-      `actions: read`. Never echoed, and passed to `curl` through a 0600 header file rather
-      than on the command line so it cannot appear in a process listing.
+      Token for the two read calls, needing `actions: read`. Never echoed, and passed to
+      `curl` through a 0600 header file rather than on the command line so it cannot appear
+      in a process listing.
     required: true
   repository:
     description: The `owner/repo` to resolve against. Defaults to the running repository.
@@ -146,24 +133,13 @@ outputs:
       `run-id`; without it the download looks in the current run and finds nothing.
     value: ${{ steps.resolve.outputs.plan-run-id }}
   head-sha:
-    description: >-
-      The pull request head SHA, full 40 characters — the commit the reviewed plan was
-      produced from.
+    description: The head SHA the artefact was resolved for, normalised to lower case.
     value: ${{ steps.resolve.outputs.head-sha }}
-  pull-request-number:
-    description: The pull request whose merge produced the commit being applied.
-    value: ${{ steps.resolve.outputs.pull-request-number }}
   artefact-expires-at:
     description: >-
       When the artefact expires, as GitHub reports it. Recorded so a run that resolved with
       hours to spare is visible in the log before the next one fails on expiry.
     value: ${{ steps.resolve.outputs.artefact-expires-at }}
-  resolution:
-    description: >-
-      Which rule selected the pull request — `merge-commit-sha-match` for the exact rule, or
-      `sole-merged-pull-request` for the rebase fallback. A caller can require the exact
-      form; an audit can tell which ran.
-    value: ${{ steps.resolve.outputs.resolution }}
 
 runs:
   using: composite
@@ -176,7 +152,7 @@ runs:
         # script body. An input carrying a quote or a `$` would otherwise be substituted
         # into the source before bash parses it, which is script injection in a step that
         # decides which plan reaches production.
-        RESOLVE_MERGE_SHA: ${{ inputs.merge-sha }}
+        RESOLVE_HEAD_SHA: ${{ inputs.head-sha }}
         RESOLVE_TOKEN: ${{ inputs.github-token }}
         RESOLVE_REPOSITORY: ${{ inputs.repository }}
         RESOLVE_PREFIX: ${{ inputs.artefact-name-prefix }}
@@ -206,11 +182,10 @@ runs:
         fail()   { record "  ✗ $1"; }
         detail() { record "        $1"; }
 
-        # Text that came from a pull request — a title, a head branch, a label — is text
-        # somebody else typed. Control characters and backticks come out before it is
-        # printed, so a branch named with a fence cannot close the ```text block in the
-        # step summary and write its own markdown after it. Truncated too, because a
-        # 4000-character title is a denial of readability.
+        # API text — a run's name, an error message — is text somebody else typed. Control
+        # characters and backticks come out so a workflow named with a fence cannot close
+        # the ```text block in the step summary and write its own markdown after it.
+        # Truncated too, because a 4000-character name is a denial of readability.
         sanitise() {
           printf '%s' "$1" | tr -d '`\000-\037\177' | cut -c1-120
         }
@@ -234,7 +209,6 @@ runs:
           exit 1
         fi
 
-        readonly MERGE_SHA="${RESOLVE_MERGE_SHA}"
         readonly REPOSITORY="${RESOLVE_REPOSITORY}"
         readonly PREFIX="${RESOLVE_PREFIX}"
         readonly RUN_EVENT="${RESOLVE_RUN_EVENT}"
@@ -253,8 +227,26 @@ runs:
 
         # Lower-cased once. Git SHAs are hex and the API answers in lower case; a caller
         # who passes an upper-case SHA must not fail an equality test on case.
-        merge_sha_lc="$(printf '%s' "${MERGE_SHA}" | tr '[:upper:]' '[:lower:]')"
-        readonly merge_sha_lc
+        head_sha="$(printf '%s' "${RESOLVE_HEAD_SHA}" | tr '[:upper:]' '[:lower:]')"
+        readonly head_sha
+
+        # Validated before it composes a name or reaches the API. The payload field is
+        # always a full SHA, so this catches a miswired caller — a misspelt field, or a
+        # `push` event where `pull_request` is absent. Empty would otherwise compose
+        # `<prefix>-` and report "not found" for what is really a misconfiguration.
+        if [[ ! "${head_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+          printf '%s\n' \
+            "✗ resolve-plan FAILED — head-sha is not a full 40-character SHA." \
+            "        artefact prefix ${PREFIX}" \
+            "        head-sha        ${head_sha:-<empty>}" \
+            "        Expected the github.event.pull_request.head.sha expression, which" \
+            "        is populated only on a pull_request event. An empty value usually" \
+            "        means this ran on a push, or that the expression names a field" \
+            "        that does not exist. The artefact name is built from this value," \
+            "        so a short or absent one composes a name no publish job ever used." \
+            "        NOTHING WAS RESOLVED. No plan was found and no apply may proceed."
+          exit 1
+        fi
 
         # ------------------------------------------------------------------ #
         # Scratch. Under RUNNER_TEMP, one per invocation, removed on every
@@ -263,19 +255,12 @@ runs:
         SCRATCH="$(mktemp -d "${RUNNER_TEMP:-/tmp}/resolve-plan.XXXXXX")"
         readonly SCRATCH
 
-        # A function that re-raises rather than a bare `trap 'rm -rf …' EXIT`. The bare
-        # form turns an abnormal abort into exit 0 on bash 3.2 — a resolver reporting
-        # success having resolved nothing. Preserving the incoming status covers an errexit
-        # abort; `reported` covers the `set -u` path, where bash 3.2 enters the trap with
-        # `$?` already 0 and then takes the shell's status from the trap's last command.
-        # `reported` is therefore the authority on whether the step finished.
-        #
-        # The directive is a false positive, not a silenced warning: `trap cleanup EXIT`
-        # eight lines down is the invocation. ShellCheck 0.11's reachability analysis stops
-        # counting a trap as a call site when the script's last statement is an
-        # unconditional `exit` — which this script's `finish` is — so it reports the
-        # function as dead. Reduced to a minimal case to confirm that is the trigger rather
-        # than a real problem with this definition.
+        # A function rather than a bare `trap 'rm -rf …' EXIT`: the bare form turns an
+        # abnormal abort into exit 0 on bash 3.2, which would report success having
+        # resolved nothing. `reported` is the authority on whether the step reached a
+        # verdict, because on the `set -u` path bash 3.2 enters the trap with `$?` at 0.
+        # SC2329 is a false positive — `trap cleanup EXIT` below is the call site, which
+        # ShellCheck stops counting when the script ends in an unconditional `exit`.
         # shellcheck disable=SC2329
         cleanup() {
           local status=$?
@@ -285,7 +270,7 @@ runs:
             printf '%s\n' \
               "✗ resolve-plan ABORTED before reaching its verdict — exit status ${status}." \
               "        artefact prefix ${PREFIX}" \
-              "        commit          ${MERGE_SHA}" \
+              "        head sha        ${head_sha}" \
               "        No artefact was resolved. Treat this as a FAILURE, not a pass, and" \
               "        do not apply: an unresolved plan is not an approved plan."
             if [[ "${status}" -eq 0 ]]; then
@@ -339,23 +324,23 @@ runs:
           fi
         }
 
-        # The permissions block, printed on any 403 so the fix is in the log rather than in
+        # The permission, printed on any 403 so the fix is in the log rather than in
         # somebody's memory. Listed in the header too; duplicated here deliberately,
         # because the person reading a red run is not reading the header.
         print_permissions_hint() {
-          detail "The calling workflow needs exactly these three reads:"
+          detail "The calling workflow needs this one read:"
           detail "    permissions:"
-          detail "      contents: read       # GET /commits/{sha}/pulls"
-          detail "      pull-requests: read  # the pull request objects it returns"
-          detail "      actions: read        # GET /actions/runs and .../artifacts"
-          detail "No write permission is needed by this action."
+          detail "      actions: read   # GET /actions/runs and .../artifacts"
+          detail "No write permission is needed by this action. A reusable workflow cannot"
+          detail "widen what its caller granted, so where the scope is unavailable a token"
+          detail "that carries it has to be passed as github-token instead."
         }
 
-        # Every failure names the component, the environment and the commit. One function
-        # so no path can omit one.
+        # Every failure names the component and the commit. One function so no path can
+        # omit one.
         subject_lines() {
           detail "artefact prefix ${PREFIX}"
-          detail "commit          ${MERGE_SHA}   (the merged commit being applied)"
+          detail "head sha        ${head_sha}   (the reviewed commit)"
         }
 
         # Verdict, summary, exit. Single exit point for a failure so the step summary is
@@ -379,172 +364,18 @@ runs:
           finish "✗ resolve-plan FAILED — $1 No artefact resolved, no apply may proceed." 1
         }
 
+        artefact_name="${PREFIX}-${head_sha}"
+
         record "resolve-plan"
         detail "artefact prefix ${PREFIX}"
-        detail "merge sha       ${MERGE_SHA}"
+        detail "head sha        ${head_sha}"
         detail "repository      ${REPOSITORY}"
-        detail "artefact form   ${PREFIX}-<pull request head sha>"
+        detail "artefact        ${artefact_name}"
+        detail "The head SHA comes from the pull_request payload, so it needs no recovery"
+        detail "from the merge commit and the merge method does not matter."
         record ""
-
         # ------------------------------------------------------------------ #
-        # 1. Merge commit → pull request.
-        #    The link that makes merge, squash and rebase all work, because
-        #    none of the three leaves the head SHA on `main`.
-        # ------------------------------------------------------------------ #
-        pulls_json="${SCRATCH}/pulls.json"
-        if ! api_get "repos/${REPOSITORY}/commits/${merge_sha_lc}/pulls?per_page=100" "${pulls_json}"; then
-          fail "the pull request for the merged commit could not be read"
-          subject_lines
-          detail "api         GET /repos/${REPOSITORY}/commits/<sha>/pulls → ${api_status}"
-          api_error_detail "${pulls_json}"
-          case "${api_status}" in
-            403) print_permissions_hint ;;
-            404) detail "The commit does not exist in this repository, or the token cannot see it." ;;
-            000) detail "The call did not complete. Network, or the API base ${API_URL} is wrong." ;;
-          esac
-          die "the merge commit could not be resolved to a pull request."
-        fi
-
-        if ! jq -e 'type == "array"' "${pulls_json}" >/dev/null 2>&1; then
-          fail "the pull request lookup returned something that is not a list"
-          subject_lines
-          detail "api         GET /repos/${REPOSITORY}/commits/<sha>/pulls → ${api_status}"
-          api_error_detail "${pulls_json}"
-          die "the pull request lookup response could not be parsed."
-        fi
-
-        candidate_count="$(jq 'length' "${pulls_json}")"
-        pass "pull request lookup returned ${candidate_count} associated pull request(s)"
-        detail "api         GET /repos/${REPOSITORY}/commits/<sha>/pulls → 200 OK"
-        detail "This endpoint returns every pull request associated with the commit — the"
-        detail "one that merged it, one whose head it is, and any whose branch contains it."
-        detail "Six came back for one commit while this was being developed, so the one"
-        detail "that merged it is selected by rule below rather than by position."
-
-        if [[ "${candidate_count}" -eq 100 ]]; then
-          warn "exactly 100 pull requests came back — the response may be truncated"
-          detail "Selection below considers only this page. If it finds nothing, that is"
-          detail "why. Reported rather than paged over silently."
-        fi
-
-        # Every candidate in the log, so a failure below can be diagnosed without
-        # re-running the call by hand. Titles and branches through `sanitise`.
-        while IFS=$'\t' read -r c_number c_state c_merged c_base c_head c_merge_sha c_branch; do
-          if [[ -z "${c_number}" ]]; then
-            continue
-          fi
-          detail "candidate   #${c_number} ${c_state} merged=${c_merged} base=$(sanitise "${c_base}") head=${c_head:0:12} merge_commit_sha=${c_merge_sha:0:12} branch=$(sanitise "${c_branch}")"
-        done < <(jq -r '.[] | [
-                    (.number // "?"),
-                    (.state // "?"),
-                    (if .merged_at == null then "no" else "yes" end),
-                    (.base.ref // "?"),
-                    (.head.sha // "?"),
-                    (.merge_commit_sha // "-"),
-                    (.head.ref // "?")
-                  ] | @tsv' "${pulls_json}")
-
-        # Rule 1: the merged pull request whose `merge_commit_sha` is this commit. Compared
-        # by prefix in both directions so a caller who passed a short SHA still matches —
-        # `github.sha` is always the full 40, so the prefix path is for manual invocation.
-        # A prefix under 7 characters is not treated as a match, because at that length it
-        # is not a commit reference, it is a coincidence.
-        selected="$(jq -r --arg sha "${merge_sha_lc}" '
-          def shamatch($a; $b):
-            ($a | ascii_downcase) as $x | ($b | ascii_downcase) as $y
-            | ($x | length) as $lx | ($y | length) as $ly
-            | if ($lx | . < 7) or ($ly | . < 7) then false
-              elif $lx <= $ly then ($y | startswith($x))
-              else ($x | startswith($y)) end;
-          [ .[]
-            | select(.merged_at != null)
-            | select(.merge_commit_sha != null)
-            | select(shamatch($sha; .merge_commit_sha))
-          ] | if length == 1 then .[0] else empty end
-        ' "${pulls_json}")"
-        resolution="merge-commit-sha-match"
-
-        if [[ -z "${selected}" ]]; then
-          # Rule 2: exactly one merged pull request and no exact match. The narrow rebase
-          # case where the applied commit is an interior replayed commit rather than the
-          # tip. Used, and said out loud.
-          selected="$(jq -r '
-            [ .[] | select(.merged_at != null) ]
-            | if length == 1 then .[0] else empty end
-          ' "${pulls_json}")"
-          if [[ -n "${selected}" ]]; then
-            resolution="sole-merged-pull-request"
-          fi
-        fi
-
-        if [[ -z "${selected}" ]]; then
-          # Rule 3: nothing unambiguous. Fail rather than pick, because a wrong pull
-          # request resolves a wrong artefact.
-          merged_count="$(jq '[.[] | select(.merged_at != null)] | length' "${pulls_json}")"
-          fail "no single pull request could be identified as the one that merged this commit"
-          subject_lines
-          detail "api         GET /repos/${REPOSITORY}/commits/<sha>/pulls → 200 OK"
-          detail "associated  ${candidate_count} pull request(s), of which ${merged_count} merged"
-          detail "Every candidate is listed above with its merge_commit_sha."
-          if [[ "${merged_count}" -eq 0 ]]; then
-            detail "None is merged. A commit reached this branch without a pull request —"
-            detail "a direct push, an admin override, or a revert made in the web UI. There"
-            detail "is no reviewed plan for it, so there is nothing to apply. This is the"
-            detail "expected outcome for a direct push, not a malfunction."
-          else
-            detail "Several are merged and none records this commit as its merge_commit_sha."
-            detail "Selecting one would be a guess, and the wrong guess applies a plan"
-            detail "produced for a different change. Resolve by hand and re-run."
-          fi
-          detail "This action does NOT re-plan. A plan generated here would be one nobody"
-          detail "reviewed, which is the behaviour this change exists to remove. To apply"
-          detail "this change, open a pull request for it so a plan is produced and"
-          detail "reviewed, then merge that."
-          die "the merged commit does not resolve to one pull request."
-        fi
-
-        pr_number="$(printf '%s' "${selected}" | jq -r '.number')"
-        head_sha="$(printf '%s' "${selected}" | jq -r '.head.sha' | tr '[:upper:]' '[:lower:]')"
-        pr_base="$(printf '%s' "${selected}" | jq -r '.base.ref // "?"')"
-        pr_branch="$(printf '%s' "${selected}" | jq -r '.head.ref // "?"')"
-        pr_title="$(printf '%s' "${selected}" | jq -r '.title // ""')"
-
-        if [[ ! "${head_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-          fail "the pull request head SHA is not a full 40-character SHA"
-          subject_lines
-          detail "pull request #${pr_number}"
-          detail "head sha    ${head_sha:-<empty>}"
-          detail "The artefact name is built from this value, so an abbreviated or absent"
-          detail "one would compose a name no publish job ever used."
-          die "the pull request head SHA could not be read."
-        fi
-
-        if [[ "${resolution}" == "merge-commit-sha-match" ]]; then
-          pass "pull request #${pr_number} merged this commit (merge_commit_sha match)"
-        else
-          warn "pull request #${pr_number} selected as the only merged candidate — fallback rule"
-          detail "No candidate records ${MERGE_SHA} as its merge_commit_sha. This is the"
-          detail "rebase case where the applied commit is an interior replayed commit."
-          detail "Reported rather than presented as an exact match, because the inference"
-          detail "is weaker than the merge_commit_sha rule."
-        fi
-        detail "head sha    ${head_sha}"
-        detail "base        $(sanitise "${pr_base}")"
-        detail "head branch $(sanitise "${pr_branch}")"
-        detail "title       $(sanitise "${pr_title}")"
-        detail "The merge sha and the head sha differ under all three permitted merge"
-        detail "methods — merge, squash and rebase — which is why resolution goes through"
-        detail "the pull request instead of head_sha = github.sha."
-
-        artefact_name="${PREFIX}-${head_sha}"
-        record ""
-        pass "artefact name composed"
-        detail "name        ${artefact_name}"
-        detail "standard-pipeline.yml composes exactly this on the plan path, from the"
-        detail "same artifact-name input plus github.event.pull_request.head.sha."
-
-        # ------------------------------------------------------------------ #
-        # 2. Head SHA → plan run(s).
+        # 1. Head SHA → plan run(s).
         #    For a pull_request event the run's head_sha IS the pull request
         #    head SHA, not the refs/pull/N/merge commit the run itself sees
         #    as github.sha. Verified against this repository.
@@ -555,35 +386,34 @@ runs:
         fi
         runs_json="${SCRATCH}/runs.json"
         if ! api_get "${runs_query}" "${runs_json}"; then
-          fail "the workflow runs for the pull request head commit could not be listed"
+          fail "the workflow runs for the reviewed commit could not be listed"
           subject_lines
-          detail "head sha    ${head_sha}   (pull request #${pr_number})"
           detail "api         GET /repos/${REPOSITORY}/actions/runs?head_sha=… → ${api_status}"
           api_error_detail "${runs_json}"
-          if [[ "${api_status}" == "403" ]]; then
-            print_permissions_hint
-          fi
+          case "${api_status}" in
+            403) print_permissions_hint ;;
+            404) detail "The repository does not exist, or the token cannot see it." ;;
+            000) detail "The call did not complete. Network, or the API base ${API_URL} is wrong." ;;
+          esac
           die "the plan run could not be listed."
         fi
 
         run_count="$(jq -r '.total_count // 0' "${runs_json}")"
-        pass "${run_count} run(s) found for the pull request head commit"
+        pass "${run_count} run(s) found for the reviewed commit"
         detail "api         GET /repos/${REPOSITORY}/actions/runs?head_sha=… → 200 OK"
         detail "event       ${RUN_EVENT:-<any>}"
         detail "Several runs share one head sha — one per workflow. The artefact name is"
-        detail "the authority, so each candidate is asked for it, newest first."
+        detail "the authority, so each candidate is asked for it, newest first, rather"
+        detail "than filtering on a workflow name every consumer sets differently."
 
         if [[ "${run_count}" -eq 0 ]]; then
-          fail "no workflow run exists for the pull request head commit"
+          fail "no workflow run exists for the reviewed commit"
           subject_lines
-          detail "head sha    ${head_sha}   (pull request #${pr_number})"
           detail "api         GET /repos/${REPOSITORY}/actions/runs?head_sha=… → 200 OK, 0 runs"
           detail "The pull request produced no run at this head commit, so no plan was ever"
           detail "published. Either the head commit was force-pushed after the run, or the"
-          detail "pipeline did not plan for this pull request."
-          detail "A pull request that produced no run at all is the case to look at:"
-          detail "check that the calling workflow triggers on pull_request for the paths"
-          detail "the change touched."
+          detail "pipeline did not plan for this pull request — check that the calling"
+          detail "workflow triggers on pull_request for the paths the change touched."
           die "no plan run exists for the reviewed commit."
         fi
 
@@ -596,16 +426,12 @@ runs:
         examined=0
         exhausted=false
 
-        # Candidates are sorted newest first here rather than by relying on the API's order,
-        # which is not documented. Reverse lexicographic on an ISO-8601 timestamp is
-        # reverse chronological.
-        #
-        # A `while read` over a process substitution rather than `mapfile` into an array.
-        # `mapfile` is bash 4, and macOS still ships bash 3.2; worse, an empty array
-        # expanded as `"${arr[@]}"` under `set -u` is an *unbound variable* on bash 4.3 and
-        # earlier, which would abort the step on the "no candidate runs" path — the very
-        # path that is supposed to produce a clear message. Process substitution rather than
-        # a pipe so the loop body runs in this shell and the values it sets survive it.
+        # Sorted newest first here rather than trusting the API's undocumented order;
+        # reverse lexicographic on ISO-8601 is reverse chronological. `while read` over a
+        # process substitution rather than `mapfile`, which is bash 4 — and an empty array
+        # under `set -u` is an unbound variable on bash 4.3 and earlier, which would abort
+        # exactly the "nothing found" path that needs to report clearly. Process
+        # substitution, not a pipe, so values set in the loop survive it.
         while IFS=$'\t' read -r run_id run_name run_attempt run_conclusion; do
           if [[ "${examined}" -ge "${MAX_RUNS}" ]]; then
             exhausted=true
@@ -614,10 +440,22 @@ runs:
           if [[ ! "${run_id}" =~ ^[0-9]+$ ]]; then
             continue
           fi
+
+          # Never resolve to the run doing the resolving. On a `pull_request` closed event
+          # this run shares the head SHA and the event with the plan run, so it is listed
+          # here too — and being the newest, it would be examined first. If anything in the
+          # calling workflow uploaded an artefact of this name before this step (a plan step
+          # that was not gated off the merge event, say), resolving to it would apply a plan
+          # generated after review while reporting success. Skipped by id so that cannot
+          # happen regardless of how the caller is wired.
+          if [[ -n "${GITHUB_RUN_ID:-}" && "${run_id}" == "${GITHUB_RUN_ID}" ]]; then
+            detail "run ${run_id}  this run  → skipped, a run cannot resolve its own plan"
+            continue
+          fi
           examined=$((examined + 1))
 
           # ---------------------------------------------------------------- #
-          # 3. Run → the artefact named for this component, environment and
+          # 2. Run → the artefact named for this component, environment and
           #    head SHA. `?name=` is an exact server-side match — verified
           #    against this repository, positively and negatively — so this
           #    cannot half-match a similarly named artefact.
@@ -679,23 +517,19 @@ runs:
             fail "the plan artefact EXPIRED and can no longer be retrieved"
             subject_lines
             detail "artefact    ${artefact_name}"
-            detail "pull request #${pr_number}, head sha ${head_sha}"
             detail "found in    run ${expired_run}, expired at ${expired_at}"
-            detail "The plan run did publish it; the configured retention elapsed between"
-            detail "the plan and the merge. Nothing has been applied and nothing will be."
-            detail "To recover: push to the pull request branch, or reopen the pull"
-            detail "request, so the pipeline plans again and publishes a fresh artefact"
-            detail "against the new head commit. Then merge that. Raising retention-days"
-            detail "widens the window for next time."
-            detail "This action does NOT re-plan. A plan generated here would be one nobody"
-            detail "reviewed, which is the behaviour this change exists to remove."
+            detail "The plan run did publish it; retention elapsed between the plan and the"
+            detail "merge. Nothing has been applied and nothing will be. To recover, reopen"
+            detail "the pull request and push to its branch so the pipeline plans again,"
+            detail "then merge that. Raising retention-days widens the window next time."
+            detail "This action does NOT re-plan: a plan generated here would be one nobody"
+            detail "reviewed, which is what this change exists to remove."
             die "the plan artefact has expired."
           fi
           if [[ "${exhausted}" == true ]]; then
             fail "the plan artefact was not found within the first ${MAX_RUNS} run(s) examined"
             subject_lines
             detail "artefact    ${artefact_name}"
-            detail "pull request #${pr_number}, head sha ${head_sha}"
             detail "runs        ${run_count} for this head sha, ${examined} examined"
             detail "Raise max-runs, or narrow plan-run-event, and re-run. Reported as its"
             detail "own case rather than as absence: the artefact may well exist in a run"
@@ -705,32 +539,27 @@ runs:
           fail "no plan artefact was published for this prefix"
           subject_lines
           detail "artefact    ${artefact_name}"
-          detail "pull request #${pr_number}, head sha ${head_sha}"
           detail "runs        ${examined} run(s) examined, none holds that artefact"
-          detail "Each run's result is listed above. The commonest causes: the plan run"
-          detail "failed before it uploaded, it did not run for this environment, or the"
-          detail "name it uploaded does not match the contract."
+          detail "Each run's result is listed above. Commonest causes: the plan run failed"
+          detail "before it uploaded, it did not run for this environment, or the name it"
+          detail "uploaded does not match the contract."
           detail "The contract is <artifact-name>-<full 40-char head sha>. The plan path"
           detail "and this step must compose it from the same artifact-name input, and a"
-          detail "prefix that does not distinguish one Terraform root from another lets"
-          detail "two roots share an artefact."
-          detail "This action does NOT re-plan. A plan generated here would be one nobody"
-          detail "reviewed, which is the behaviour this change exists to remove. To"
-          detail "recover, push to the pull request branch so the pipeline plans again,"
-          detail "then merge that."
-          die "no plan artefact exists for the merged commit."
+          detail "prefix that does not distinguish one Terraform root from another lets two"
+          detail "roots share an artefact."
+          detail "This action does NOT re-plan. To recover, reopen the pull request and"
+          detail "push to its branch so the pipeline plans again, then merge that."
+          die "no plan artefact exists for the reviewed commit."
         fi
 
         # ------------------------------------------------------------------ #
         # Outputs, then the verdict
         # ------------------------------------------------------------------ #
-        # Every value is refused if it carries a line break. GITHUB_OUTPUT is parsed line
-        # by line, so a value containing a newline sets arbitrary step outputs — a value
-        # ending `\nis-applicable=true` would forge a downstream gate. The guard in
-        # These particular values are SHAs, integers and a
-        # name composed from inputs, so it is a check rather than an expectation — which is
-        # exactly why it is cheap to keep. No pull-request-authored text is written here at
-        # all; titles and branch names stay in the summary.
+        # GITHUB_OUTPUT is parsed line by line, so a value carrying a newline can set
+        # arbitrary step outputs — one ending `\nis-applicable=true` would forge a
+        # downstream gate. These values are a SHA, two integers and a composed name, so
+        # this is a cheap check rather than an expectation. No API-authored text is written
+        # here at all; run names stay in the summary.
         emit_output() {
           local name="$1" value="$2"
           if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
@@ -745,11 +574,10 @@ runs:
         }
 
         if [[ -z "${GITHUB_OUTPUT:-}" ]]; then
-          # A runner sets GITHUB_OUTPUT for every `run` step, so this means the script is
-          # being invoked by something other than Actions. Reported rather than defaulted to
-          # /dev/null: otherwise a reader debugs an empty `artefact-name` instead of the
-          # harness that dropped it. Not fatal — the resolution above still succeeded and
-          # the values are printed here because nothing else received them.
+          # A runner sets GITHUB_OUTPUT for every `run` step, so this means something
+          # other than Actions is invoking the script. Reported rather than silently
+          # dropped, so a reader debugs the harness and not an empty `artefact-name`. Not
+          # fatal: the resolution above still succeeded and is printed here.
           warn "GITHUB_OUTPUT is not set — the step outputs were not written"
           detail "Expected only outside GitHub Actions, which sets it for every run step."
         fi
@@ -758,13 +586,11 @@ runs:
         emit_output "artefact-id" "${artefact_id}"
         emit_output "plan-run-id" "${plan_run_id}"
         emit_output "head-sha" "${head_sha}"
-        emit_output "pull-request-number" "${pr_number}"
         emit_output "artefact-expires-at" "${artefact_expires_at}"
-        emit_output "resolution" "${resolution}"
 
         record ""
         record "  resolved  ${artefact_name}"
-        detail "run ${plan_run_id}, artefact ${artefact_id}, pull request #${pr_number}"
+        detail "run ${plan_run_id}, artefact ${artefact_id}"
         detail "Pass plan-run-id as run-id to actions/download-artifact; without it the"
         detail "download looks in the current run and finds nothing."
         detail "Resolution only. Whether this plan may still be applied is Terraform's"
@@ -772,4 +598,4 @@ runs:
         detail "against, and terraform apply <planfile> refuses before changing anything"
         detail "if either has moved."
 
-        finish "✓ resolve-plan resolved ${artefact_name} from run ${plan_run_id} (pull request #${pr_number}, ${resolution})." 0
+        finish "✓ resolve-plan resolved ${artefact_name} from run ${plan_run_id}." 0

@@ -8,6 +8,16 @@ on:
         required: false
         default: "main"
         type: string
+      apply-reviewed-plan:
+        description: >-
+          Apply the plan reviewed on the pull request rather than one generated on this
+          push. When true the plan artefact name gains the pull request head SHA, and on a
+          push to apply-branch the pipeline resolves that artefact and applies it. Requires
+          the plan_artifact_token secret, which needs actions:read. Defaults false, which
+          leaves artefact naming and the same-run apply exactly as they are today.
+        required: false
+        default: false
+        type: boolean
       artifact-name:
         description: "Name of the plan artifact. Defaults to terraform-plan-file-<github-environment>. Set this to include a component element when a repository has more than one Terraform root."
         required: false
@@ -216,7 +226,10 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
           account_id: ${{ secrets.ACCOUNT_ID }}
-          artifact-name: ${{ inputs.artifact-name }}
+          # With apply-reviewed-plan the name gains the pull request head SHA so a later
+          # apply can resolve it. The consumer never supplies the SHA: it is unavailable
+          # on a push, which is why the pipeline owns the naming on both paths.
+          artifact-name: ${{ inputs.apply-reviewed-plan && format('{0}-{1}', inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment), github.event.pull_request.head.sha || github.sha) || inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           retention-days: ${{ inputs.retention-days }}
@@ -225,6 +238,22 @@ jobs:
           tfvars-file: ${{ inputs.tfvars-file }}
           working-directory: ${{ inputs.working-directory }}
 
+      # Converts the merged commit back to the pull request head SHA and finds that run's
+      # plan artefact. Only on the apply path, and only when asked for. On failure it fails
+      # with no outputs, so the apply below is skipped rather than falling back to the fresh
+      # plan this feature exists to stop applying.
+      - name: Resolve Reviewed Plan
+        if: ${{ inputs.apply-reviewed-plan && inputs.use-backend == true && github.ref_name == inputs.apply-branch }}
+        id: resolve-plan
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/resolve-plan@main
+        with:
+          artefact-name-prefix: ${{ inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
+          merge-sha: ${{ github.sha }}
+          # This job's permissions are contents / pull-requests / id-token, so its own
+          # GITHUB_TOKEN cannot read another run's artefacts. The same secret actions/apply
+          # already uses for the cross-run download serves here.
+          github-token: ${{ secrets.plan_artifact_token }}
+
       - name: Terraform Apply
         if: ${{ inputs.use-backend == true && github.ref_name == inputs.apply-branch }}
         id: apply
@@ -232,19 +261,21 @@ jobs:
         with:
           apply-branch: ${{ inputs.apply-branch }}
           account_id: ${{ secrets.ACCOUNT_ID }}
-          artifact-name: ${{ inputs.artifact-name }}
+          # A resolved name and run id win; otherwise this is byte-for-byte as before, so a
+          # caller that resolves plan-run-id for itself keeps working unchanged.
+          artifact-name: ${{ steps.resolve-plan.outputs.artefact-name != '' && steps.resolve-plan.outputs.artefact-name || inputs.apply-reviewed-plan && format('{0}-{1}', inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment), github.event.pull_request.head.sha || github.sha) || inputs.artifact-name != '' && inputs.artifact-name || format('terraform-plan-file-{0}', inputs.github-environment) }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           github-token: ${{ secrets.plan_artifact_token }}
-          plan-run-id: ${{ inputs.plan-run-id }}
+          plan-run-id: ${{ steps.resolve-plan.outputs.plan-run-id != '' && steps.resolve-plan.outputs.plan-run-id || inputs.plan-run-id }}
           role-to-assume: ${{ inputs.role-to-assume }}
           # This job always runs actions/init before the apply, so the apply must not
           # run its own init on the default path. These reach the action only on the
           # cross-run path, where the plan being applied was not produced by this run.
-          state-bucket: ${{ inputs.plan-run-id != '' && inputs.state-bucket || '' }}
-          state-dynamodb-table: ${{ inputs.plan-run-id != '' && inputs.state-dynamodb-table || '' }}
-          state-encrypt: ${{ inputs.plan-run-id != '' && inputs.state-encrypt || '' }}
-          state-key: ${{ inputs.plan-run-id != '' && inputs.state-key || '' }}
-          state-use-lockfile: ${{ inputs.plan-run-id != '' && inputs.state-use-lockfile || '' }}
+          state-bucket: ${{ (steps.resolve-plan.outputs.plan-run-id != '' && steps.resolve-plan.outputs.plan-run-id || inputs.plan-run-id) != '' && inputs.state-bucket || '' }}
+          state-dynamodb-table: ${{ (steps.resolve-plan.outputs.plan-run-id != '' && steps.resolve-plan.outputs.plan-run-id || inputs.plan-run-id) != '' && inputs.state-dynamodb-table || '' }}
+          state-encrypt: ${{ (steps.resolve-plan.outputs.plan-run-id != '' && steps.resolve-plan.outputs.plan-run-id || inputs.plan-run-id) != '' && inputs.state-encrypt || '' }}
+          state-key: ${{ (steps.resolve-plan.outputs.plan-run-id != '' && steps.resolve-plan.outputs.plan-run-id || inputs.plan-run-id) != '' && inputs.state-key || '' }}
+          state-use-lockfile: ${{ (steps.resolve-plan.outputs.plan-run-id != '' && steps.resolve-plan.outputs.plan-run-id || inputs.plan-run-id) != '' && inputs.state-use-lockfile || '' }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ inputs.working-directory }}

@@ -83,7 +83,8 @@ inputs:
     required: true
   head-sha:
     description: >-
-      The pull request head SHA — `${{ github.event.pull_request.head.sha }}`. The commit
+      The pull request head SHA, as the `pull_request` payload carries it —
+      `github.event.pull_request.head.sha` wrapped in an expression. The commit
       the reviewed plan was produced from, and the commit the artefact is named for. The
       payload of a `pull_request` event carries it directly, so it is taken rather than
       inferred. A full 40-character lower- or upper-case hex SHA is required; anything else
@@ -114,7 +115,8 @@ inputs:
     required: false
     default: "50"
   api-url:
-    description: GitHub API base. Defaults to `${{ github.api_url }}` so this works on GHES.
+    description: >-
+      GitHub API base. Defaults to the `github.api_url` expression so this works on GHES.
     required: false
     default: ${{ github.api_url }}
 

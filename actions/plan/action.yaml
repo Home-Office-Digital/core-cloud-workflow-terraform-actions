@@ -71,6 +71,20 @@ runs:
           terraform plan -input=false -out=tfplan
         fi
 
+    - name: Output Plan as JSON
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        terraform show -no-color -json tfplan > tfplan.json
+
+    - name: Build Plan Summary
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        python3 "${{ github.action_path }}/summarise_plan.py" tfplan.json >> "${GITHUB_STEP_SUMMARY}"
+
     - name: Upload Plan File
       uses: actions/upload-artifact@v4
       with:

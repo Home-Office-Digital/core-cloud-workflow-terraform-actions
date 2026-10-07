@@ -34,6 +34,11 @@ inputs:
     required: false
     default: '.'
     type: string
+  artifact-name:
+    description: 'Name of the plan artefact to download. Defaults to the legacy per-environment name to preserve existing caller behaviour.'
+    required: false
+    default: terraform-plan-file-${{ inputs.github-environment }}
+    type: string
 
 runs:
   using: composite
@@ -47,7 +52,7 @@ runs:
     - name: Download Plan File
       uses: actions/download-artifact@v4
       with:
-        name: terraform-plan-file-${{ inputs.github-environment }}
+        name: ${{ inputs.artifact-name }}
         path: ${{ inputs.working-directory }}
 
     - uses: aws-actions/configure-aws-credentials@v4

@@ -1,0 +1,349 @@
+name: Terraform Deploy
+
+# Reusable deployment workflow. A single run plans a stack for an environment at
+# a pinned version. The gated apply job is added in task 5.4; the fan-out matrix
+# in task 10.3; production governance (change-request / version checks) in task 8.x.
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: "Stack to deploy (single stack name for this task; comma-list/'all' fan-out is Phase 5)."
+        required: true
+        type: string
+      environment:
+        description: "Target environment: dev | test | prod."
+        required: true
+        type: string
+      version:
+        description: "Git ref to deploy: branch/tag/SHA for Dev; release tag for Test/Prod."
+        required: true
+        type: string
+      change-request:
+        description: "Change request reference (CHG<digits>), required for Prod. Validated in a later phase."
+        required: false
+        type: string
+        default: ""
+      break-glass:
+        description: >-
+          Emergency path for incident response. When true it WAIVES the Prod
+          change-request check (governance skips the CHG<digits> validation) and
+          WAIVES the independent-approver requirement, yet still produces a fresh
+          plan (the plan job always runs) and still routes apply through a GitHub
+          Environment gate. The approver waiver is enforced by targeting a
+          separate break-glass environment on the apply job (see that job's
+          `environment:`), whose protection rules omit the independent-approver
+          requirement; those rules are admin-owned (external dependency 12.6).
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: >-
+          Deprecated. Retained for interface compatibility only. The plan and
+          apply jobs derive each matrix leg's working directory from the leg's
+          stack (`terraform/stacks/<stack>`, the convention the Testing_Repo
+          caller uses), so this single value cannot vary per leg and is
+          effectively superseded (mirrors pr-validation.yml). The `expand` job
+          still consults it to locate the stacks directory for the `all` case.
+        required: false
+        type: string
+        default: "."
+      plan-role:
+        description: >-
+          OIDC role name assumed by the plan job (the Plan_Role for the target
+          environment). Exposed as an input so the split Plan_Role/Apply_Role can
+          be adopted later; where a split role is unavailable the caller passes
+          the existing combined per-environment role.
+        required: false
+        type: string
+      apply-role:
+        description: >-
+          OIDC role name assumed by the apply job (the Apply_Role for the target
+          environment). Exposed as an input so the split Plan_Role/Apply_Role can
+          be adopted later; where a split role is unavailable the caller passes
+          the existing combined per-environment role (the same value as plan-role).
+        required: false
+        type: string
+      aws-region:
+        description: "AWS Region for the state bucket and resources."
+        required: false
+        type: string
+        default: "eu-west-2"
+      state-bucket:
+        description: "Name of the S3 bucket holding Terraform state."
+        required: false
+        type: string
+      state-dynamodb-table:
+        description: "Name of the DynamoDB table used for state locking."
+        required: false
+        type: string
+        default: ""
+      terraform-version:
+        description: "Terraform version to use."
+        required: false
+        type: string
+        default: "~1.7.0"
+      tfvars-file:
+        description: "Optional tfvars file passed to the plan."
+        required: false
+        type: string
+        default: ""
+    secrets:
+      account_id:
+        description: "AWS account ID for the target environment."
+        required: false
+
+run-name: "deploy ${{ inputs.stack }} to ${{ inputs.environment }} @ ${{ inputs.version }}"
+
+# NO top-level `concurrency:` here on purpose. The `stack` input can fan out into
+# a matrix of several stacks (task 10.3), and a top-level concurrency group is
+# per-workflow-run: it cannot vary per matrix leg. Keying one shared group off
+# `inputs.stack` would serialise every leg of a multi-stack dispatch into a
+# single queue — the opposite of the independent-per-stack serialisation
+# Requirement 14 asks for. Instead, each leg owns its serialisation via a
+# JOB-LEVEL `concurrency:` on the plan and apply jobs, keyed by
+# `tf-apply-${{ matrix.stack }}-${{ inputs.environment }}` with
+# `cancel-in-progress: false`. That gives one queue per stack+environment, so a
+# second deploy of the same target queues behind the running one while different
+# stacks proceed in parallel (Requirement 14.1, 14.2).
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Production governance gate. Runs BEFORE any checkout or plan so a rejected
+  # deployment never touches Terraform code. Both plan and apply depend on this
+  # job (plan via `needs: governance`, apply transitively via plan), so a failed
+  # check stops the whole run before checkout. The job checks out nothing and
+  # needs no helper scripts: it validates the dispatch inputs inline.
+  #
+  # Prod requires a change-request matching CHG<digits> unless break-glass is
+  # set. Non-Prod environments carry no change-request requirement, so the step
+  # is skipped by its `if:` condition.
+  governance:
+    name: "Governance (${{ inputs.environment }})"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate change request
+        if: ${{ inputs.environment == 'prod' && !inputs.break-glass }}
+        shell: bash
+        env:
+          CHANGE_REQUEST: ${{ inputs.change-request }}
+        run: |
+          if [[ ! "${CHANGE_REQUEST}" =~ ^CHG[0-9]+$ ]]; then
+            echo "::error::Prod deployment rejected: change-request must match CHG<digits> (e.g. CHG123), or set break-glass to bypass."
+            exit 1
+          fi
+          echo "change-request ${CHANGE_REQUEST} accepted for Prod."
+
+  # Fan-out expansion (task 10.1 / 10.3). Turns the single `stack` input into a
+  # JSON array that the plan and apply jobs consume as a matrix, one leg per
+  # stack. Inline bash only — there is no helper script.
+  #
+  #   - a single stack  (e.g. `stack-a`)        -> ["stack-a"]
+  #   - a comma list    (`stack-a, stack-b`)    -> ["stack-a","stack-b"]
+  #     (whitespace trimmed, empties dropped, duplicates removed, order kept)
+  #   - the value `all`                         -> every immediate subdirectory
+  #     of the stacks directory, enumerated from the checked-out caller tree
+  #
+  # `needs: governance` keeps the governance gate ahead of any expansion, so a
+  # rejected Prod deploy never fans out. The `all` case needs the consumer's
+  # stacks directory, which lives in the CALLER's repo, so this job checks that
+  # repo out (at `version`) first and enumerates `<working-directory>/terraform/stacks/*`
+  # relative to the checked-out working tree.
+  expand:
+    name: "Expand stacks"
+    needs: governance
+    runs-on: ubuntu-latest
+    outputs:
+      stacks: ${{ steps.expand.outputs.stacks }}
+    steps:
+      - name: Checkout at version
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Expand stack input to JSON array
+        id: expand
+        shell: bash
+        env:
+          STACK_INPUT: ${{ inputs.stack }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${STACK_INPUT}" == "all" ]]; then
+            # Enumerate immediate subdirectories of the stacks directory in the
+            # checked-out caller tree. Each directory name is one stack.
+            stacks_dir="${WORKING_DIRECTORY%/}/terraform/stacks"
+            if [[ ! -d "${stacks_dir}" ]]; then
+              echo "::error::stack=all but stacks directory '${stacks_dir}' was not found in the checked-out tree."
+              exit 1
+            fi
+            mapfile -t names < <(find "${stacks_dir}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+            if [[ "${#names[@]}" -eq 0 ]]; then
+              echo "::error::stack=all but no stacks were found under '${stacks_dir}'."
+              exit 1
+            fi
+          else
+            # Split on commas, trim surrounding whitespace, drop empties, dedupe
+            # while preserving first-seen order.
+            IFS=',' read -ra raw <<< "${STACK_INPUT}"
+            names=()
+            declare -A seen=()
+            for item in "${raw[@]}"; do
+              trimmed="${item#"${item%%[![:space:]]*}"}"
+              trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+              [[ -z "${trimmed}" ]] && continue
+              [[ -n "${seen[${trimmed}]:-}" ]] && continue
+              seen[${trimmed}]=1
+              names+=("${trimmed}")
+            done
+            if [[ "${#names[@]}" -eq 0 ]]; then
+              echo "::error::stack input '${STACK_INPUT}' expanded to no stacks."
+              exit 1
+            fi
+          fi
+
+          # Emit a compact JSON array, e.g. ["stack-a","stack-b"].
+          json="$(printf '%s\n' "${names[@]}" | jq -R . | jq -cs .)"
+          echo "Expanded stack input '${STACK_INPUT}' to ${json}"
+          echo "stacks=${json}" >> "${GITHUB_OUTPUT}"
+
+  plan:
+    name: "Plan ${{ matrix.stack }} (${{ inputs.environment }})"
+    needs: expand
+    runs-on: ubuntu-latest
+    # Fan-out: one independent plan leg per stack. `fromJSON` turns the expand
+    # job's JSON array into the matrix values.
+    strategy:
+      matrix:
+        stack: ${{ fromJSON(needs.expand.outputs.stacks) }}
+    # Per-leg serialisation. Each stack+environment owns its own queue so legs
+    # for different stacks run in parallel while a repeat deploy of the same
+    # target queues behind the running one (Requirement 14.1, 14.2). This
+    # replaces the removed top-level concurrency, which could not vary per leg.
+    concurrency:
+      group: tf-apply-${{ matrix.stack }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    # No `environment:` here on purpose: the plan job must never gate. The
+    # Approval_Gate lives only on the apply job (task 5.4). `needs: expand`
+    # (which itself `needs: governance`) guarantees the governance checks pass
+    # and the stack list is resolved before this job checks out any code.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Per-leg working directory, derived from this leg's stack. The single
+      # `working-directory` input cannot vary per matrix leg, so a multi-stack
+      # fan-out would otherwise run every leg in the same directory. Each stack's
+      # root module lives at `terraform/stacks/<stack>` (the Testing_Repo
+      # convention), so init/plan below use this value, not the input (mirrors
+      # pr-validation.yml).
+      stack-working-directory: terraform/stacks/${{ matrix.stack }}
+    steps:
+      - name: Checkout at version
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Terraform Init
+        uses: ./actions/init
+        with:
+          account_id: ${{ secrets.account_id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ inputs.plan-role }}
+          state-bucket: ${{ inputs.state-bucket }}
+          state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
+          state-key: ${{ matrix.stack }}/${{ inputs.environment }}/terraform.tfstate
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.stack-working-directory }}
+          use-backend: "true"
+
+      - name: Terraform Plan
+        uses: ./actions/plan
+        with:
+          account_id: ${{ secrets.account_id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ inputs.plan-role }}
+          terraform-version: ${{ inputs.terraform-version }}
+          tfvars-file: ${{ inputs.tfvars-file }}
+          working-directory: ${{ env.stack-working-directory }}
+          artifact-name: terraform-plan-${{ matrix.stack }}-${{ inputs.environment }}
+  apply:
+    name: "Apply ${{ matrix.stack }} (${{ inputs.environment }})"
+    needs: [expand, plan]
+    runs-on: ubuntu-latest
+    # Fan-out: one independent apply leg per stack, matching the plan matrix so
+    # each leg consumes its own plan artefact.
+    strategy:
+      matrix:
+        stack: ${{ fromJSON(needs.expand.outputs.stacks) }}
+    # Same per-leg serialisation group as the plan job for this stack, so a
+    # stack's plan and apply share one queue and never overlap with another
+    # run of the same target (Requirement 14.1, 14.2).
+    concurrency:
+      group: tf-apply-${{ matrix.stack }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    # The Approval_Gate lives ONLY here, per leg. `environment:` binds this job
+    # to the target GitHub Environment, so its protection rules (required
+    # reviewers, independent approver) gate each stack's apply once an admin
+    # configures them. `needs: plan` plus the per-leg `artifact-name` (keyed by
+    # `matrix.stack`) guarantees each leg's apply consumes the exact artefact
+    # its own plan leg produced in this run and never re-plans.
+    #
+    # Break-glass (Requirement 7.2/7.4): apply ALWAYS runs under an environment,
+    # so the gate is never skipped — only its rule set changes. A normal deploy
+    # targets `<environment>`; a break-glass deploy targets
+    # `<environment>-break-glass`. The independent-approver waiver cannot be
+    # expressed in YAML (it is a GitHub Environment protection rule), so the
+    # break-glass environment is a SEPARATE environment whose rules are
+    # configured by an admin to omit the independent-approver requirement
+    # (external dependency 12.6). The gate still applies and the plan is still
+    # produced fresh; only the approver rule differs.
+    environment: ${{ inputs.break-glass && format('{0}-break-glass', inputs.environment) || inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Per-leg working directory, derived from this leg's stack — must match the
+      # plan job's derivation so apply operates in the same stack directory the
+      # plan was produced in. See the plan job's note; mirrors pr-validation.yml.
+      stack-working-directory: terraform/stacks/${{ matrix.stack }}
+    steps:
+      - name: Checkout at version
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Terraform Init
+        uses: ./actions/init
+        with:
+          account_id: ${{ secrets.account_id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ inputs.apply-role }}
+          state-bucket: ${{ inputs.state-bucket }}
+          state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
+          state-key: ${{ matrix.stack }}/${{ inputs.environment }}/terraform.tfstate
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.stack-working-directory }}
+          use-backend: "true"
+
+      # Downloads terraform-plan-<stack>-<environment> (the plan job's artefact)
+      # and runs `terraform apply -input=false tfplan`. Missing/incomplete
+      # artefacts fail download-artifact; a stale plan is refused by Terraform's
+      # saved-plan apply; a no-op plan applies cleanly with no change. No custom
+      # missing/stale/no-op logic is needed here (see design error-handling table).
+      - name: Terraform Apply
+        uses: ./actions/apply
+        with:
+          account_id: ${{ secrets.account_id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ inputs.apply-role }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.stack-working-directory }}
+          artifact-name: terraform-plan-${{ matrix.stack }}-${{ inputs.environment }}

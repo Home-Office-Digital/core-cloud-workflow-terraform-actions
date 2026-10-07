@@ -1,0 +1,216 @@
+name: Terraform PR Validation
+
+# Reusable PR validation workflow. Runs the Terraform quality chain
+# (init -> fmt -> validate -> test -> plan) with NO apply step and only the
+# least-privilege Plan_Role, so pull request validation can never change
+# resources (Requirements 8.5, 10.2, 10.3, 10.4).
+#
+# Validate-all fan-out (Requirements 11.4, 11.5 as validate-all): instead of
+# detecting which stacks a PR touches, this workflow validates EVERY stack on
+# every PR. A `discover` job enumerates the immediate subdirectories of the
+# stacks root (default `terraform/stacks`) and emits a JSON array; the
+# `validate` job then runs as a matrix over all stacks. Validating every stack
+# on every PR is simpler for the POC and surfaces knock-on changes / drift in
+# shared modules immediately, rather than risking a missed consumer. There is
+# deliberately no affected-stack detection and no helper script.
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        description: "AWS Region for the State Bucket and Resources"
+        default: eu-west-2
+        required: false
+        type: string
+      fmt-recursive:
+        description: "Whether to run terraform fmt recursively across subdirectories"
+        required: false
+        default: true
+        type: boolean
+      github-environment:
+        description: "The name of your AWS environment. Create an environment secret called ACCOUNT_ID, also."
+        required: false
+        default: "placeholder"
+        type: string
+      role-to-assume:
+        description: >-
+          AWS Role name for OIDC used by the plan step. This is the Plan_Role
+          (read-only, least privilege). Exposed as an input so the split-role
+          model can be adopted later; if not provided the caller's existing
+          combined per-environment role is used.
+        required: false
+        type: string
+      stacks-dir:
+        description: >-
+          Root directory whose immediate subdirectories are the stacks to
+          validate. The `discover` job enumerates `<stacks-dir>/*` and the
+          `validate` matrix runs one leg per stack.
+        required: false
+        default: "terraform/stacks"
+        type: string
+      state-bucket:
+        description: "Name of the S3 bucket for Terraform State"
+        required: false
+        type: string
+      state-dynamodb-table:
+        description: "Name of the DynamoDB table"
+        required: false
+        default: ""
+        type: string
+      state-key:
+        description: "Where you want the state key to be"
+        required: false
+        type: string
+        default: "terraform.tfstate"
+      terraform-version:
+        description: "Terraform version to use"
+        required: false
+        default: "~1.7.0"
+        type: string
+      tfvars-file:
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: >-
+          Deprecated. Retained for interface compatibility only. The validate
+          matrix derives each leg's working directory from `stacks-dir` and the
+          matrix stack (`<stacks-dir>/<stack>`), so this input is ignored.
+        required: false
+        default: "."
+        type: string
+    secrets:
+      account_id:
+        required: false
+      sonar_host_url:
+        required: false
+      sonar_token:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  # Enumerate every stack under the stacks root and emit a JSON array that the
+  # validate job fans out over. Inline bash, no helper script: list the
+  # immediate subdirectories of `<stacks-dir>` and build a compact JSON array of
+  # their names. Emitting the array to $GITHUB_OUTPUT lets the matrix consume it
+  # via fromJSON. If the stacks root is missing or empty the step fails loudly
+  # rather than silently validating nothing.
+  discover:
+    name: "Discover stacks"
+    runs-on: ubuntu-latest
+    outputs:
+      stacks: ${{ steps.enumerate.outputs.stacks }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Enumerate stacks
+        id: enumerate
+        shell: bash
+        env:
+          STACKS_DIR: ${{ inputs.stacks-dir }}
+        run: |
+          if [[ ! -d "${STACKS_DIR}" ]]; then
+            echo "::error::Stacks root '${STACKS_DIR}' not found."
+            exit 1
+          fi
+          # Immediate subdirectories only; sort for a stable matrix order.
+          mapfile -t stacks < <(find "${STACKS_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+          if [[ ${#stacks[@]} -eq 0 ]]; then
+            echo "::error::No stacks found under '${STACKS_DIR}'."
+            exit 1
+          fi
+          json="["
+          for i in "${!stacks[@]}"; do
+            [[ $i -gt 0 ]] && json+=","
+            json+="\"${stacks[$i]}\""
+          done
+          json+="]"
+          echo "Discovered stacks: ${json}"
+          echo "stacks=${json}" >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: "Terraform PR Validation (${{ matrix.stack }})"
+    needs: discover
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.github-environment }}
+
+    # Validate ALL stacks, one leg per stack. fail-fast: false so one stack's
+    # failure does not cancel the others — every PR shows the full plan/drift
+    # impact across all stacks (Requirements 11.4, 11.5 as validate-all).
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJSON(needs.discover.outputs.stacks) }}
+
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    env:
+      # Each leg's working directory is derived from the stacks root and the
+      # matrix stack, replacing the single `working-directory` input.
+      stack-working-directory: ${{ inputs.stacks-dir }}/${{ matrix.stack }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Terraform Init
+        id: init
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
+        with:
+          account_id: ${{ secrets.account_id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.github-environment }}
+          role-to-assume: ${{ inputs.role-to-assume }}
+          state-bucket: ${{ inputs.state-bucket }}
+          state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
+          state-key: ${{ inputs.state-key }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.stack-working-directory }}
+
+      - name: Terraform Fmt
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@main
+        with:
+          # Fix: pass the configured working-directory. The legacy inline PR
+          # validation left this empty on pull_request events (Requirement 10.4).
+          working-directory: ${{ env.stack-working-directory }}
+          recursive: ${{ inputs.fmt-recursive }}
+          terraform-version: ${{ inputs.terraform-version }}
+
+      - name: Terraform Validate
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@main
+        with:
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.stack-working-directory }}
+
+      - name: Terraform Test
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@main
+        with:
+          working-directory: ${{ env.stack-working-directory }}
+          sonar-host-url: ${{ secrets.sonar_host_url }}
+          sonar-token: ${{ secrets.sonar_token }}
+
+      # Plan only — assumes the Plan_Role. There is deliberately NO apply step
+      # and NO apply role, so PR validation can never change resources
+      # (Requirements 8.5, 10.3).
+      - name: Terraform Plan
+        id: plan
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
+        with:
+          account_id: ${{ secrets.account_id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.github-environment }}
+          role-to-assume: ${{ inputs.role-to-assume }}
+          terraform-version: ${{ inputs.terraform-version }}
+          tfvars-file: ${{ inputs.tfvars-file }}
+          working-directory: ${{ env.stack-working-directory }}

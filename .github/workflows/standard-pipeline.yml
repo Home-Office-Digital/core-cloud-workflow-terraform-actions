@@ -42,6 +42,11 @@ on:
         description: "AWS Role name for OIDC"
         required: false
         type: string
+      runner:
+        description: 'For use with a specific runner'
+        required: false
+        default: 'ubuntu-latest'
+        type: string
       state-bucket:
         description: "Name of the S3 bucket for Terraform State"
         required: false
@@ -120,7 +125,7 @@ permissions:
 jobs:
   terraform-standardised-pipeline:
     name: "Terraform Standardised Pipeline"
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.github-environment }}
     env:
       TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}

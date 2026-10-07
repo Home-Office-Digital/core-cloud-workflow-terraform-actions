@@ -47,22 +47,6 @@ on:
         required: false
         type: string
         default: "."
-      plan-role:
-        description: >-
-          OIDC role name assumed by the plan job (the Plan_Role for the target
-          environment). Exposed as an input so the split Plan_Role/Apply_Role can
-          be adopted later; where a split role is unavailable the caller passes
-          the existing combined per-environment role.
-        required: false
-        type: string
-      apply-role:
-        description: >-
-          OIDC role name assumed by the apply job (the Apply_Role for the target
-          environment). Exposed as an input so the split Plan_Role/Apply_Role can
-          be adopted later; where a split role is unavailable the caller passes
-          the existing combined per-environment role (the same value as plan-role).
-        required: false
-        type: string
       aws-region:
         description: "AWS Region for the state bucket and resources."
         required: false
@@ -90,6 +74,12 @@ on:
     secrets:
       account_id:
         description: "AWS account ID for the target environment."
+        required: false
+      plan-role:
+        description: "OIDC role name assumed by the plan job (the read-only Plan_Role). A role name is not sensitive, but it is passed as a secret because a reusable workflow cannot receive secrets-context values through its inputs."
+        required: false
+      apply-role:
+        description: "OIDC role name assumed by the apply job (the resource-changing Apply_Role). Passed as a secret for the same reason as plan-role; where no split role exists, the caller passes the same value as plan-role."
         required: false
 
 run-name: "deploy ${{ inputs.stack }} to ${{ inputs.environment }} @ ${{ inputs.version }}"
@@ -253,7 +243,7 @@ jobs:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
-          role-to-assume: ${{ inputs.plan-role }}
+          role-to-assume: ${{ secrets.plan-role }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
           state-key: ${{ matrix.stack }}/${{ inputs.environment }}/terraform.tfstate
@@ -267,7 +257,7 @@ jobs:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
-          role-to-assume: ${{ inputs.plan-role }}
+          role-to-assume: ${{ secrets.plan-role }}
           terraform-version: ${{ inputs.terraform-version }}
           tfvars-file: ${{ inputs.tfvars-file }}
           working-directory: ${{ env.stack-working-directory }}
@@ -324,7 +314,7 @@ jobs:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
-          role-to-assume: ${{ inputs.apply-role }}
+          role-to-assume: ${{ secrets.apply-role }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
           state-key: ${{ matrix.stack }}/${{ inputs.environment }}/terraform.tfstate
@@ -343,7 +333,7 @@ jobs:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
-          role-to-assume: ${{ inputs.apply-role }}
+          role-to-assume: ${{ secrets.apply-role }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}
           artifact-name: terraform-plan-${{ matrix.stack }}-${{ inputs.environment }}

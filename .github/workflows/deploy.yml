@@ -143,9 +143,13 @@ jobs:
         with:
           ref: ${{ inputs.version }}
 
+      # Full-path ref, not ./actions: this reusable workflow runs from a caller
+      # repo whose checkout owns the workspace, so a local ./ path would resolve
+      # against the caller's tree (which has no actions/) and fail. Pinned to the
+      # feature branch until the POC merges to main.
       - name: Expand stack input to JSON array
         id: expand
-        uses: ./actions/expand-stacks
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/expand-stacks@feature/add-new-terraform-workflows
         with:
           stack: ${{ inputs.stack }}
           stacks-dir: ${{ inputs.working-directory }}/terraform/stacks

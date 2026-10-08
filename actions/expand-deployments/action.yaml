@@ -1,22 +1,37 @@
+# Turns deploy selectors into the exact list of jobs a matrix should run.
+#
+# A deployment is a tfvars file. One tfvars = one deployment; its filename
+# (minus .tfvars) is the deployment name. The number of deployments for a
+# stack+environment is just how many tfvars files sit in:
+#
+#   terraform/stacks/<stack>/environments/<environment>/inputs/*.tfvars
+#
+# Given stack, deployment, and environment selectors (each a name, a comma
+# list, or 'all'), this emits one {stack, deployment} object per real tfvars.
+# The caller feeds that to `strategy.matrix.include` to fan out one leg each.
+#
+# Example (environment=dev), where stack-b has dev.tfvars and dev-2.tfvars:
+#   stack=all deployment=all ->
+#     [{stack: stack-a, deployment: dev},
+#      {stack: stack-b, deployment: dev},
+#      {stack: stack-b, deployment: dev-2}, ...]
+#
+# A selected deployment with no tfvars file is a hard error, never a silent skip.
+
 name: "Expand deployments"
-description: "Resolve stack and deployment selectors into a JSON include-list of {stack, deployment} pairs for a matrix, for one environment. A deployment is a tfvars file under <stack>/environments/<environment>/inputs/."
+description: "Resolve stack/deployment/environment selectors into a JSON {stack, deployment} include-list for a matrix. A deployment is a tfvars file under <stack>/environments/<environment>/inputs/."
 
 inputs:
   stack:
-    description: >-
-      Stack selector: a single name, a comma-separated list, or 'all' to use
-      every subdirectory of stacks-dir. 'all' is reserved.
+    description: "Stack name, comma list, or 'all' (every subdirectory of stacks-dir). 'all' is reserved."
     required: false
     default: "all"
   deployment:
-    description: >-
-      Deployment selector: a single name, a comma-separated list, or 'all' for
-      every deployment present for the stack and environment. A deployment name
-      is a tfvars basename (tenant-1 for tenant-1.tfvars). 'all' is reserved.
+    description: "Deployment name, comma list, or 'all' (every tfvars for the stack+environment). 'all' is reserved."
     required: false
     default: "all"
   environment:
-    description: "Environment whose deployments are enumerated (dev, test, prod)."
+    description: "Environment to enumerate: dev, test, or prod."
     required: true
   stacks-dir:
     description: "Directory whose immediate subdirectories are the stacks."
@@ -65,22 +80,19 @@ runs:
         # Deployment names for a stack+environment: the tfvars basenames under
         # environments/<env>/inputs/.
         list_deployments() {
-          find "$1" -mindepth 1 -maxdepth 1 -type f -name '*.tfvars' -printf '%f\n' \
+          find "$1" -maxdepth 1 -type f -name '*.tfvars' -printf '%f\n' \
             | sed 's/\.tfvars$//' | sort
         }
 
-        # Resolve the stack list.
+        # Resolve the stack list. A missing or empty stacks-dir yields no stacks,
+        # which the check below reports.
         if [[ "${STACK_INPUT}" == "all" ]]; then
-          if [[ ! -d "${STACKS_DIR}" ]]; then
-            echo "::error::stack=all but stacks directory '${STACKS_DIR}' was not found."
-            exit 1
-          fi
-          mapfile -t stacks < <(find "${STACKS_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+          mapfile -t stacks < <(find "${STACKS_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
         else
           parse_selector "${STACK_INPUT}" stacks
         fi
         if [[ "${#stacks[@]}" -eq 0 ]]; then
-          echo "::error::stack selector '${STACK_INPUT}' resolved to no stacks."
+          echo "::error::stack selector '${STACK_INPUT}' resolved to no stacks under '${STACKS_DIR}'."
           exit 1
         fi
 
@@ -105,6 +117,8 @@ runs:
           fi
 
           for dep in "${deployments[@]}"; do
+            # Guards an explicit deployment selector (a typo'd or absent name);
+            # always true for the 'all' path, where names come from real files.
             if [[ ! -f "${inputs_dir}/${dep}.tfvars" ]]; then
               echo "::error::deployment '${dep}' not found for stack '${stack}' in '${ENVIRONMENT}' (expected ${inputs_dir}/${dep}.tfvars)."
               exit 1

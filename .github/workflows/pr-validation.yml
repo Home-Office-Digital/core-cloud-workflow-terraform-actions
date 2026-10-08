@@ -117,7 +117,10 @@ jobs:
     name: "Terraform PR Validation (${{ matrix.stack }})"
     needs: discover
     runs-on: ubuntu-latest
-    environment: ${{ inputs.github-environment }}
+    # No `environment:` here: PR validation is plan-only and must never hit an
+    # environment approval gate. The account_id and role come from repo-level
+    # secrets passed by the caller, not environment-scoped secrets, so binding
+    # to an environment would only add a spurious required-reviewers pause.
 
     # Validate ALL stacks, one leg per stack. fail-fast: false so one stack's
     # failure does not cancel the others — every PR shows the full plan/drift

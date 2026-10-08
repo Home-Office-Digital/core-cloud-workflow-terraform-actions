@@ -192,7 +192,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Terraform Init
-        uses: ./actions/init
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
@@ -206,7 +206,7 @@ jobs:
           use-backend: "true"
 
       - name: Terraform Plan
-        uses: ./actions/plan
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
@@ -263,7 +263,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Terraform Init
-        uses: ./actions/init
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
@@ -282,7 +282,7 @@ jobs:
       # saved-plan apply; a no-op plan applies cleanly with no change. No custom
       # missing/stale/no-op logic is needed here (see design error-handling table).
       - name: Terraform Apply
-        uses: ./actions/apply
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
         with:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}

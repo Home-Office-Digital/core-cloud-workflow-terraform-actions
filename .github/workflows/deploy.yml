@@ -126,21 +126,11 @@ jobs:
           fi
           echo "change-request ${CHANGE_REQUEST} accepted for Prod."
 
-  # Fan-out expansion (task 10.1 / 10.3). Turns the single `stack` input into a
-  # JSON array that the plan and apply jobs consume as a matrix, one leg per
-  # stack. Inline bash only — there is no helper script.
-  #
-  #   - a single stack  (e.g. `stack-a`)        -> ["stack-a"]
-  #   - a comma list    (`stack-a, stack-b`)    -> ["stack-a","stack-b"]
-  #     (whitespace trimmed, empties dropped, duplicates removed, order kept)
-  #   - the value `all`                         -> every immediate subdirectory
-  #     of the stacks directory, enumerated from the checked-out caller tree
-  #
-  # `needs: governance` keeps the governance gate ahead of any expansion, so a
-  # rejected Prod deploy never fans out. The `all` case needs the consumer's
-  # stacks directory, which lives in the CALLER's repo, so this job checks that
-  # repo out (at `version`) first and enumerates `<working-directory>/terraform/stacks/*`
-  # relative to the checked-out working tree.
+  # Fan-out expansion. Turns the `stack` input (single name, comma list, or
+  # 'all') into a JSON array the plan and apply jobs consume as a matrix.
+  # `needs: governance` keeps the governance gate ahead of expansion, so a
+  # rejected Prod deploy never fans out. The 'all' case enumerates the caller's
+  # stacks directory, so this job checks the caller out (at `version`) first.
   expand:
     name: "Expand stacks"
     needs: governance
@@ -155,50 +145,10 @@ jobs:
 
       - name: Expand stack input to JSON array
         id: expand
-        shell: bash
-        env:
-          STACK_INPUT: ${{ inputs.stack }}
-          WORKING_DIRECTORY: ${{ inputs.working-directory }}
-        run: |
-          set -euo pipefail
-
-          if [[ "${STACK_INPUT}" == "all" ]]; then
-            # Enumerate immediate subdirectories of the stacks directory in the
-            # checked-out caller tree. Each directory name is one stack.
-            stacks_dir="${WORKING_DIRECTORY%/}/terraform/stacks"
-            if [[ ! -d "${stacks_dir}" ]]; then
-              echo "::error::stack=all but stacks directory '${stacks_dir}' was not found in the checked-out tree."
-              exit 1
-            fi
-            mapfile -t names < <(find "${stacks_dir}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
-            if [[ "${#names[@]}" -eq 0 ]]; then
-              echo "::error::stack=all but no stacks were found under '${stacks_dir}'."
-              exit 1
-            fi
-          else
-            # Split on commas, trim surrounding whitespace, drop empties, dedupe
-            # while preserving first-seen order.
-            IFS=',' read -ra raw <<< "${STACK_INPUT}"
-            names=()
-            declare -A seen=()
-            for item in "${raw[@]}"; do
-              trimmed="${item#"${item%%[![:space:]]*}"}"
-              trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
-              [[ -z "${trimmed}" ]] && continue
-              [[ -n "${seen[${trimmed}]:-}" ]] && continue
-              seen[${trimmed}]=1
-              names+=("${trimmed}")
-            done
-            if [[ "${#names[@]}" -eq 0 ]]; then
-              echo "::error::stack input '${STACK_INPUT}' expanded to no stacks."
-              exit 1
-            fi
-          fi
-
-          # Emit a compact JSON array, e.g. ["stack-a","stack-b"].
-          json="$(printf '%s\n' "${names[@]}" | jq -R . | jq -cs .)"
-          echo "Expanded stack input '${STACK_INPUT}' to ${json}"
-          echo "stacks=${json}" >> "${GITHUB_OUTPUT}"
+        uses: ./actions/expand-stacks
+        with:
+          stack: ${{ inputs.stack }}
+          stacks-dir: ${{ inputs.working-directory }}/terraform/stacks
 
   plan:
     name: "Plan ${{ matrix.stack }} (${{ inputs.environment }})"

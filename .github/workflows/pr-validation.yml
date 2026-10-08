@@ -92,12 +92,9 @@ permissions:
   id-token: write
 
 jobs:
-  # Enumerate every stack under the stacks root and emit a JSON array that the
-  # validate job fans out over. Inline bash, no helper script: list the
-  # immediate subdirectories of `<stacks-dir>` and build a compact JSON array of
-  # their names. Emitting the array to $GITHUB_OUTPUT lets the matrix consume it
-  # via fromJSON. If the stacks root is missing or empty the step fails loudly
-  # rather than silently validating nothing.
+  # Enumerate every stack under the stacks root into a JSON array the validate
+  # job fans out over. Validation always runs all stacks, so this passes the
+  # expand-stacks action its default selector ('all').
   discover:
     name: "Discover stacks"
     runs-on: ubuntu-latest
@@ -109,28 +106,12 @@ jobs:
 
       - name: Enumerate stacks
         id: enumerate
-        shell: bash
-        env:
-          STACKS_DIR: ${{ inputs.stacks-dir }}
-        run: |
-          if [[ ! -d "${STACKS_DIR}" ]]; then
-            echo "::error::Stacks root '${STACKS_DIR}' not found."
-            exit 1
-          fi
-          # Immediate subdirectories only; sort for a stable matrix order.
-          mapfile -t stacks < <(find "${STACKS_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
-          if [[ ${#stacks[@]} -eq 0 ]]; then
-            echo "::error::No stacks found under '${STACKS_DIR}'."
-            exit 1
-          fi
-          json="["
-          for i in "${!stacks[@]}"; do
-            [[ $i -gt 0 ]] && json+=","
-            json+="\"${stacks[$i]}\""
-          done
-          json+="]"
-          echo "Discovered stacks: ${json}"
-          echo "stacks=${json}" >> "$GITHUB_OUTPUT"
+        # Pinned to the feature branch, not @main: expand-stacks is new in this
+        # POC and not yet on main (mirrors the init/plan/etc. refs once merged).
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/expand-stacks@feature/add-new-terraform-workflows
+        with:
+          stack: all
+          stacks-dir: ${{ inputs.stacks-dir }}
 
   validate:
     name: "Terraform PR Validation (${{ matrix.stack }})"

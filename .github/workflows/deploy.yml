@@ -231,12 +231,14 @@ jobs:
     concurrency:
       group: tf-apply-${{ matrix.stack }}-${{ inputs.environment }}
       cancel-in-progress: false
-    # The Approval_Gate lives ONLY here, per leg. `environment:` binds this job
-    # to the target GitHub Environment, so its protection rules (required
-    # reviewers, independent approver) gate each stack's apply once an admin
-    # configures them. `needs: plan` plus the per-leg `artifact-name` (keyed by
-    # `matrix.stack`) guarantees each leg's apply consumes the exact artefact
-    # its own plan leg produced in this run and never re-plans.
+    # The approval gate lives only on apply. `environment:` binds the job to the
+    # target GitHub Environment, whose protection rules (required reviewers)
+    # gate the apply. The gate is per environment per run, not per leg: one
+    # approval releases every stack leg targeting this environment in this run.
+    # To approve a narrower set, dispatch with a specific `stack` (one name or a
+    # comma list) so the run only contains those legs. `needs: plan` plus the
+    # per-leg `artifact-name` (keyed by `matrix.stack`) guarantees each leg
+    # applies the exact artefact its own plan produced and never re-plans.
     #
     # Break-glass (Requirement 7.2/7.4): apply ALWAYS runs under an environment,
     # so the gate is never skipped — only its rule set changes. A normal deploy

@@ -76,13 +76,10 @@ on:
         required: false
       role-to-assume:
         description: >-
-          AWS Role NAME for OIDC used by the plan step. This is the Plan_Role
-          (read-only, least privilege). Passed as a secret (not an input)
-          because a reusable workflow cannot receive secrets-context values
-          through its `with:` inputs, and callers hold the deployed role name
-          in a secret so a role recreation is a one-line secret update. A role
-          name is not itself sensitive. If omitted, the plan step receives an
-          empty role name.
+          Role name (not ARN) for the read-only plan role. A secret rather than
+          an input because a reusable workflow cannot read secrets context in a
+          caller's `with:` block; the name itself is not sensitive. Omitting it
+          leaves the plan role empty.
         required: false
       sonar_host_url:
         required: false
@@ -173,11 +170,10 @@ jobs:
           role-to-assume: ${{ secrets.role-to-assume }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
-          # Per-leg state key, matching the deploy workflow's
-          # `<stack>/<environment>/terraform.tfstate` layout so the PR plan
-          # reads the SAME remote state the deploy writes and therefore shows
-          # real drift. The flat `state-key` input would point every stack at
-          # one key and misreport drift, so it is intentionally not used here.
+          # Per-stack key matching the deploy workflow's layout, so the plan
+          # reads the same state the deploy writes and shows real drift. The
+          # flat `state-key` input would share one key across stacks, so it is
+          # not used here.
           state-key: ${{ matrix.stack }}/${{ inputs.github-environment }}/terraform.tfstate
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}

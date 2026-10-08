@@ -19,20 +19,15 @@ on:
         required: true
         type: string
       change-request:
-        description: "Change request reference (CHG<digits>), required for Prod. Validated in a later phase."
+        description: >-
+          Prod only. Must be a change reference matching CHG<digits> (e.g.
+          CHG123), or the literal `bypass` to proceed without one in an
+          incident. Any other value is rejected. Either way the Prod
+          environment approval still applies; `bypass` waives only the
+          change-request requirement, not the gate.
         required: false
         type: string
         default: ""
-      break-glass:
-        description: >-
-          Emergency path for incident response. When true it waives only the
-          Prod change-request check (governance skips the CHG<digits>
-          validation). It still produces a fresh plan and still applies through
-          the same environment gate as a normal deploy, so a reviewer must
-          approve. It does not route to a separate environment.
-        required: false
-        type: boolean
-        default: false
       working-directory:
         description: >-
           Deprecated. Retained for interface compatibility only. The plan and
@@ -104,24 +99,28 @@ jobs:
   # check stops the whole run before checkout. The job checks out nothing and
   # needs no helper scripts: it validates the dispatch inputs inline.
   #
-  # Prod requires a change-request matching CHG<digits> unless break-glass is
-  # set. Non-Prod environments carry no change-request requirement, so the step
-  # is skipped by its `if:` condition.
+  # Prod requires change-request to be a CHG<digits> reference or the literal
+  # `bypass`. Non-Prod carries no requirement, so the step is skipped by its
+  # `if:`. `bypass` waives only this check; the Prod environment approval gate
+  # still applies on apply.
   governance:
     name: "Governance (${{ inputs.environment }})"
     runs-on: ubuntu-latest
     steps:
       - name: Validate change request
-        if: ${{ inputs.environment == 'prod' && !inputs.break-glass }}
+        if: ${{ inputs.environment == 'prod' }}
         shell: bash
         env:
           CHANGE_REQUEST: ${{ inputs.change-request }}
         run: |
-          if [[ ! "${CHANGE_REQUEST}" =~ ^CHG[0-9]+$ ]]; then
-            echo "::error::Prod deployment rejected: change-request must match CHG<digits> (e.g. CHG123), or set break-glass to bypass."
+          if [[ "${CHANGE_REQUEST}" == "bypass" ]]; then
+            echo "change-request bypassed for Prod; environment approval still applies."
+          elif [[ "${CHANGE_REQUEST}" =~ ^CHG[0-9]+$ ]]; then
+            echo "change-request ${CHANGE_REQUEST} accepted for Prod."
+          else
+            echo "::error::Prod deployment rejected: change-request must match CHG<digits> (e.g. CHG123), or be 'bypass' for an incident."
             exit 1
           fi
-          echo "change-request ${CHANGE_REQUEST} accepted for Prod."
 
   # Fan-out expansion. Turns the `stack` input (single name, comma list, or
   # 'all') into a JSON array the plan and apply jobs consume as a matrix.
@@ -237,13 +236,13 @@ jobs:
     # per-leg `artifact-name` (keyed by `matrix.stack`) guarantees each leg
     # applies the exact artefact its own plan produced and never re-plans.
     #
-    # Break-glass binds to the same environment as a normal deploy, so the
-    # environment's approval gate still applies. It only bypasses the
-    # change-request check in the governance job (see that job's `if:`). It does
-    # not route to a separate `-break-glass` environment: doing so let GitHub
-    # auto-create a missing environment with no protection, turning break-glass
-    # into an ungated apply. Keeping it on the real environment means the gate
-    # is never skipped, only the CHG requirement is.
+    # Apply always binds to the target environment, including when
+    # change-request is `bypass`. The environment's approval gate therefore
+    # always applies; `bypass` waives only the change-request check in
+    # governance. An earlier design routed the bypass path to a separate
+    # `-break-glass` environment, which let GitHub auto-create it with no
+    # protection and so skipped the gate entirely. Staying on the real
+    # environment avoids that.
     environment: ${{ inputs.environment }}
     permissions:
       contents: read

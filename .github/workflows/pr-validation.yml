@@ -173,7 +173,12 @@ jobs:
           role-to-assume: ${{ secrets.role-to-assume }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
-          state-key: ${{ inputs.state-key }}
+          # Per-leg state key, matching the deploy workflow's
+          # `<stack>/<environment>/terraform.tfstate` layout so the PR plan
+          # reads the SAME remote state the deploy writes and therefore shows
+          # real drift. The flat `state-key` input would point every stack at
+          # one key and misreport drift, so it is intentionally not used here.
+          state-key: ${{ matrix.stack }}/${{ inputs.github-environment }}/terraform.tfstate
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}
 

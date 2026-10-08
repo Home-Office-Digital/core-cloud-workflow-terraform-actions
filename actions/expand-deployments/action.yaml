@@ -43,7 +43,7 @@ runs:
         set -euo pipefail
 
         # Split a comma selector into a bash array: trim, drop empties, dedupe
-        # keeping order. Copied from expand-stacks; 'all' is handled by callers.
+        # keeping order. 'all' is handled separately by the callers below.
         parse_selector() {
           local input="$1"
           local -n out="$2"

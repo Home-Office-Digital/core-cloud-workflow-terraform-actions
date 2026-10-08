@@ -32,14 +32,6 @@ on:
         required: false
         default: "placeholder"
         type: string
-      role-to-assume:
-        description: >-
-          AWS Role name for OIDC used by the plan step. This is the Plan_Role
-          (read-only, least privilege). Exposed as an input so the split-role
-          model can be adopted later; if not provided the caller's existing
-          combined per-environment role is used.
-        required: false
-        type: string
       stacks-dir:
         description: >-
           Root directory whose immediate subdirectories are the stacks to
@@ -81,6 +73,16 @@ on:
         type: string
     secrets:
       account_id:
+        required: false
+      role-to-assume:
+        description: >-
+          AWS Role NAME for OIDC used by the plan step. This is the Plan_Role
+          (read-only, least privilege). Passed as a secret (not an input)
+          because a reusable workflow cannot receive secrets-context values
+          through its `with:` inputs, and callers hold the deployed role name
+          in a secret so a role recreation is a one-line secret update. A role
+          name is not itself sensitive. If omitted, the plan step receives an
+          empty role name.
         required: false
       sonar_host_url:
         required: false
@@ -168,7 +170,7 @@ jobs:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
-          role-to-assume: ${{ inputs.role-to-assume }}
+          role-to-assume: ${{ secrets.role-to-assume }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
           state-key: ${{ inputs.state-key }}
@@ -210,7 +212,7 @@ jobs:
           account_id: ${{ secrets.account_id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
-          role-to-assume: ${{ inputs.role-to-assume }}
+          role-to-assume: ${{ secrets.role-to-assume }}
           terraform-version: ${{ inputs.terraform-version }}
           tfvars-file: ${{ inputs.tfvars-file }}
           working-directory: ${{ env.stack-working-directory }}

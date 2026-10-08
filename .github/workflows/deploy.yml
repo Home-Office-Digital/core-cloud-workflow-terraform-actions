@@ -25,14 +25,11 @@ on:
         default: ""
       break-glass:
         description: >-
-          Emergency path for incident response. When true it WAIVES the Prod
-          change-request check (governance skips the CHG<digits> validation) and
-          WAIVES the independent-approver requirement, yet still produces a fresh
-          plan (the plan job always runs) and still routes apply through a GitHub
-          Environment gate. The approver waiver is enforced by targeting a
-          separate break-glass environment on the apply job (see that job's
-          `environment:`), whose protection rules omit the independent-approver
-          requirement; those rules are admin-owned (external dependency 12.6).
+          Emergency path for incident response. When true it waives only the
+          Prod change-request check (governance skips the CHG<digits>
+          validation). It still produces a fresh plan and still applies through
+          the same environment gate as a normal deploy, so a reviewer must
+          approve. It does not route to a separate environment.
         required: false
         type: boolean
         default: false
@@ -240,16 +237,14 @@ jobs:
     # per-leg `artifact-name` (keyed by `matrix.stack`) guarantees each leg
     # applies the exact artefact its own plan produced and never re-plans.
     #
-    # Break-glass (Requirement 7.2/7.4): apply ALWAYS runs under an environment,
-    # so the gate is never skipped — only its rule set changes. A normal deploy
-    # targets `<environment>`; a break-glass deploy targets
-    # `<environment>-break-glass`. The independent-approver waiver cannot be
-    # expressed in YAML (it is a GitHub Environment protection rule), so the
-    # break-glass environment is a SEPARATE environment whose rules are
-    # configured by an admin to omit the independent-approver requirement
-    # (external dependency 12.6). The gate still applies and the plan is still
-    # produced fresh; only the approver rule differs.
-    environment: ${{ inputs.break-glass && format('{0}-break-glass', inputs.environment) || inputs.environment }}
+    # Break-glass binds to the same environment as a normal deploy, so the
+    # environment's approval gate still applies. It only bypasses the
+    # change-request check in the governance job (see that job's `if:`). It does
+    # not route to a separate `-break-glass` environment: doing so let GitHub
+    # auto-create a missing environment with no protection, turning break-glass
+    # into an ungated apply. Keeping it on the real environment means the gate
+    # is never skipped, only the CHG requirement is.
+    environment: ${{ inputs.environment }}
     permissions:
       contents: read
       id-token: write

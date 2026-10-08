@@ -154,11 +154,11 @@ jobs:
           role-to-assume: ${{ secrets.role-to-assume }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
-          # Per-stack key matching the deploy workflow's layout, so the plan
-          # reads the same state the deploy writes and shows real drift. The
-          # flat `state-key` input would share one key across stacks, so it is
-          # not used here.
-          state-key: ${{ matrix.stack }}/${{ inputs.github-environment }}/terraform.tfstate
+          # Key must match the deploy workflow's <stack>/<env>/<deployment>
+          # layout so the PR plan reads the same state the deploy writes and
+          # shows real drift. PR validation plans the single dev deployment,
+          # which is named `dev`, hence the repeated segment.
+          state-key: ${{ matrix.stack }}/${{ inputs.github-environment }}/${{ inputs.github-environment }}/terraform.tfstate
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}
 

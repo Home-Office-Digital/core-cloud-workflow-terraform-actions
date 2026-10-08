@@ -59,10 +59,6 @@ on:
         required: false
         default: "~1.7.0"
         type: string
-      tfvars-file:
-        required: false
-        type: string
-        default: ""
       working-directory:
         description: >-
           Deprecated. Retained for interface compatibility only. The validate
@@ -92,29 +88,31 @@ permissions:
   id-token: write
 
 jobs:
-  # Enumerate every stack under the stacks root into a JSON array the validate
-  # job fans out over. Validation always runs all stacks, so this passes the
-  # expand-stacks action its default selector ('all').
+  # Enumerate every {stack, deployment} pair for this environment into a JSON
+  # include-list the validate job fans out over. Validation always covers every
+  # stack and every deployment, so both selectors default to 'all'. A stack+env
+  # with several deployments (e.g. two under dev) yields one validate leg each.
   discover:
-    name: "Discover stacks"
+    name: "Discover deployments"
     runs-on: ubuntu-latest
     outputs:
-      stacks: ${{ steps.enumerate.outputs.stacks }}
+      include: ${{ steps.enumerate.outputs.include }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Enumerate stacks
+      - name: Enumerate stack and deployment pairs
         id: enumerate
-        # Pinned to the feature branch, not @main: expand-stacks is new in this
-        # POC and not yet on main (mirrors the init/plan/etc. refs once merged).
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/expand-stacks@feature/add-new-terraform-workflows
+        # Pinned to the feature branch, not @main: new in this POC, not yet on main.
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/expand-deployments@feature/add-new-terraform-workflows
         with:
           stack: all
+          deployment: all
+          environment: ${{ inputs.github-environment }}
           stacks-dir: ${{ inputs.stacks-dir }}
 
   validate:
-    name: "Terraform PR Validation (${{ matrix.stack }})"
+    name: "Terraform PR Validation (${{ matrix.stack }}/${{ matrix.deployment }})"
     needs: discover
     runs-on: ubuntu-latest
     # No `environment:` here: PR validation is plan-only and must never hit an
@@ -122,13 +120,13 @@ jobs:
     # secrets passed by the caller, not environment-scoped secrets, so binding
     # to an environment would only add a spurious required-reviewers pause.
 
-    # Validate ALL stacks, one leg per stack. fail-fast: false so one stack's
-    # failure does not cancel the others — every PR shows the full plan/drift
-    # impact across all stacks (Requirements 11.4, 11.5 as validate-all).
+    # Validate every {stack, deployment} pair, one leg each. fail-fast: false so
+    # one leg's failure does not cancel the others — every PR shows the full
+    # plan/drift impact across all stacks and deployments.
     strategy:
       fail-fast: false
       matrix:
-        stack: ${{ fromJSON(needs.discover.outputs.stacks) }}
+        include: ${{ fromJSON(needs.discover.outputs.include) }}
 
     permissions:
       contents: read
@@ -136,8 +134,6 @@ jobs:
       id-token: write
 
     env:
-      # Each leg's working directory is derived from the stacks root and the
-      # matrix stack, replacing the single `working-directory` input.
       stack-working-directory: ${{ inputs.stacks-dir }}/${{ matrix.stack }}
 
     steps:
@@ -154,11 +150,10 @@ jobs:
           role-to-assume: ${{ secrets.role-to-assume }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
-          # Key must match the deploy workflow's <stack>/<env>/<deployment>
-          # layout so the PR plan reads the same state the deploy writes and
-          # shows real drift. PR validation plans the single dev deployment,
-          # which is named `dev`, hence the repeated segment.
-          state-key: ${{ matrix.stack }}/${{ inputs.github-environment }}/${{ inputs.github-environment }}/terraform.tfstate
+          # Key matches the deploy workflow's <stack>/<env>/<deployment> layout
+          # so the PR plan reads the same state the deploy writes and shows real
+          # drift. One leg per deployment, so each reads its own deployment state.
+          state-key: ${{ matrix.stack }}/${{ inputs.github-environment }}/${{ matrix.deployment }}/terraform.tfstate
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}
 
@@ -199,5 +194,7 @@ jobs:
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ secrets.role-to-assume }}
           terraform-version: ${{ inputs.terraform-version }}
-          tfvars-file: ${{ inputs.tfvars-file }}
+          # Per-leg tfvars, derived from the deployment, mirroring the deploy
+          # workflow. Replaces the single `tfvars-file` caller input.
+          tfvars-file: environments/${{ inputs.github-environment }}/inputs/${{ matrix.deployment }}.tfvars
           working-directory: ${{ env.stack-working-directory }}

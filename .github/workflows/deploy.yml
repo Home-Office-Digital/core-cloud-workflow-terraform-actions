@@ -7,9 +7,18 @@ on:
   workflow_call:
     inputs:
       stack:
-        description: "Stack to deploy (single stack name for this task; comma-list/'all' fan-out is Phase 5)."
-        required: true
+        description: "Stack selector: a single name, a comma list, or 'all'."
+        required: false
         type: string
+        default: all
+      deployment:
+        description: >-
+          Deployment selector within each stack's environments/<environment>/
+          inputs: a single name, a comma list, or 'all'. A deployment is a
+          tfvars file; dev/test usually have one, prod fans out across several.
+        required: false
+        type: string
+        default: all
       environment:
         description: "Target environment: dev | test | prod."
         required: true
@@ -58,15 +67,15 @@ on:
         required: false
         type: string
         default: "~1.7.0"
-      tfvars-file:
-        description: "Optional tfvars file passed to the plan."
-        required: false
-        type: string
-        default: ""
     secrets:
-      account_id:
-        description: "AWS account ID for the target environment."
-        required: false
+      deployment-accounts:
+        description: >-
+          JSON object mapping deployment name to AWS account ID, e.g.
+          {"tenant-1":"<id>","dev":"<id>"}. Each leg looks up its own account by
+          its deployment name. Passed as a secret (callers source it from a repo
+          variable) so account IDs stay out of git. An account ID is not itself
+          a credential.
+        required: true
       plan-role:
         description: "OIDC role name assumed by the plan job (the read-only Plan_Role). A role name is not sensitive, but it is passed as a secret because a reusable workflow cannot receive secrets-context values through its inputs."
         required: false
@@ -83,10 +92,10 @@ run-name: "deploy ${{ inputs.stack }} to ${{ inputs.environment }} @ ${{ inputs.
 # single queue — the opposite of the independent-per-stack serialisation
 # Requirement 14 asks for. Instead, each leg owns its serialisation via a
 # JOB-LEVEL `concurrency:` on the plan and apply jobs, keyed by
-# `tf-apply-${{ matrix.stack }}-${{ inputs.environment }}` with
-# `cancel-in-progress: false`. That gives one queue per stack+environment, so a
-# second deploy of the same target queues behind the running one while different
-# stacks proceed in parallel (Requirement 14.1, 14.2).
+# `tf-apply-<stack>-<deployment>-<environment>` with `cancel-in-progress: false`.
+# That gives one queue per stack+deployment+environment, so a second deploy of
+# the same target queues behind the running one while different stacks and
+# deployments proceed in parallel (Requirement 14.1, 14.2).
 
 permissions:
   contents: read
@@ -128,11 +137,11 @@ jobs:
   # rejected Prod deploy never fans out. The 'all' case enumerates the caller's
   # stacks directory, so this job checks the caller out (at `version`) first.
   expand:
-    name: "Expand stacks"
+    name: "Expand deployments"
     needs: governance
     runs-on: ubuntu-latest
     outputs:
-      stacks: ${{ steps.expand.outputs.stacks }}
+      include: ${{ steps.expand.outputs.include }}
     steps:
       - name: Checkout at version
         uses: actions/checkout@v4
@@ -143,44 +152,46 @@ jobs:
       # repo whose checkout owns the workspace, so a local ./ path would resolve
       # against the caller's tree (which has no actions/) and fail. Pinned to the
       # feature branch until the POC merges to main.
-      - name: Expand stack input to JSON array
+      #
+      # Produces a {stack, deployment} include-list for this environment: one
+      # entry per tfvars file under <stack>/environments/<env>/inputs/. dev/test
+      # typically yield one deployment; prod fans out across several.
+      - name: Expand stack and deployment selectors
         id: expand
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/expand-stacks@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/expand-deployments@feature/add-new-terraform-workflows
         with:
           stack: ${{ inputs.stack }}
+          deployment: ${{ inputs.deployment }}
+          environment: ${{ inputs.environment }}
           stacks-dir: ${{ inputs.working-directory }}/terraform/stacks
 
   plan:
-    name: "Plan ${{ matrix.stack }} (${{ inputs.environment }})"
+    name: "Plan ${{ matrix.stack }}/${{ matrix.deployment }} (${{ inputs.environment }})"
     needs: expand
     runs-on: ubuntu-latest
-    # Fan-out: one independent plan leg per stack. `fromJSON` turns the expand
-    # job's JSON array into the matrix values.
+    # Fan-out: one independent plan leg per {stack, deployment} pair. The expand
+    # job emits the exact pairs that exist for this environment, so the matrix
+    # never produces a stack+deployment combination with no tfvars.
     strategy:
+      fail-fast: false
       matrix:
-        stack: ${{ fromJSON(needs.expand.outputs.stacks) }}
-    # Per-leg serialisation. Each stack+environment owns its own queue so legs
-    # for different stacks run in parallel while a repeat deploy of the same
-    # target queues behind the running one (Requirement 14.1, 14.2). This
-    # replaces the removed top-level concurrency, which could not vary per leg.
+        include: ${{ fromJSON(needs.expand.outputs.include) }}
+    # Per-leg serialisation, keyed by stack+deployment+environment so each
+    # deployment owns its own queue. Two deployments of the same stack (e.g.
+    # tenant-1 and tenant-2) run in parallel; a repeat of the same target queues.
     concurrency:
-      group: tf-apply-${{ matrix.stack }}-${{ inputs.environment }}
+      group: tf-apply-${{ matrix.stack }}-${{ matrix.deployment }}-${{ inputs.environment }}
       cancel-in-progress: false
     # No `environment:` here on purpose: the plan job must never gate. The
-    # Approval_Gate lives only on the apply job (task 5.4). `needs: expand`
-    # (which itself `needs: governance`) guarantees the governance checks pass
-    # and the stack list is resolved before this job checks out any code.
+    # approval gate lives only on the apply job.
     permissions:
       contents: read
       id-token: write
     env:
-      # Per-leg working directory, derived from this leg's stack. The single
-      # `working-directory` input cannot vary per matrix leg, so a multi-stack
-      # fan-out would otherwise run every leg in the same directory. Each stack's
-      # root module lives at `terraform/stacks/<stack>` (the Testing_Repo
-      # convention), so init/plan below use this value, not the input (mirrors
-      # pr-validation.yml).
       stack-working-directory: terraform/stacks/${{ matrix.stack }}
+      # Account for this leg, looked up from the deployment -> account-id map the
+      # caller passes (sourced from a repo variable, never committed to git).
+      account-id: ${{ fromJSON(secrets.deployment-accounts)[matrix.deployment] }}
     steps:
       - name: Checkout at version
         uses: actions/checkout@v4
@@ -190,13 +201,13 @@ jobs:
       - name: Terraform Init
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
-          account_id: ${{ secrets.account_id }}
+          account_id: ${{ env.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.plan-role }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
-          state-key: ${{ matrix.stack }}/${{ inputs.environment }}/terraform.tfstate
+          state-key: ${{ matrix.stack }}/${{ inputs.environment }}/${{ matrix.deployment }}/terraform.tfstate
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}
           use-backend: "true"
@@ -204,28 +215,29 @@ jobs:
       - name: Terraform Plan
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
-          account_id: ${{ secrets.account_id }}
+          account_id: ${{ env.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.plan-role }}
           terraform-version: ${{ inputs.terraform-version }}
-          tfvars-file: ${{ inputs.tfvars-file }}
+          tfvars-file: environments/${{ inputs.environment }}/inputs/${{ matrix.deployment }}.tfvars
           working-directory: ${{ env.stack-working-directory }}
-          artifact-name: terraform-plan-${{ matrix.stack }}-${{ inputs.environment }}
+          artifact-name: terraform-plan-${{ matrix.stack }}-${{ matrix.deployment }}-${{ inputs.environment }}
   apply:
-    name: "Apply ${{ matrix.stack }} (${{ inputs.environment }})"
+    name: "Apply ${{ matrix.stack }}/${{ matrix.deployment }} (${{ inputs.environment }})"
     needs: [expand, plan]
     runs-on: ubuntu-latest
-    # Fan-out: one independent apply leg per stack, matching the plan matrix so
-    # each leg consumes its own plan artefact.
+    # Fan-out: one independent apply leg per {stack, deployment}, matching the
+    # plan matrix so each leg consumes its own plan artefact.
     strategy:
+      fail-fast: false
       matrix:
-        stack: ${{ fromJSON(needs.expand.outputs.stacks) }}
-    # Same per-leg serialisation group as the plan job for this stack, so a
-    # stack's plan and apply share one queue and never overlap with another
-    # run of the same target (Requirement 14.1, 14.2).
+        include: ${{ fromJSON(needs.expand.outputs.include) }}
+    # Same per-leg serialisation group as the plan job, so a deployment's plan
+    # and apply share one queue and never overlap with another run of the same
+    # target.
     concurrency:
-      group: tf-apply-${{ matrix.stack }}-${{ inputs.environment }}
+      group: tf-apply-${{ matrix.stack }}-${{ matrix.deployment }}-${{ inputs.environment }}
       cancel-in-progress: false
     # The approval gate lives only on apply. `environment:` binds the job to the
     # target GitHub Environment, whose protection rules (required reviewers)
@@ -248,10 +260,8 @@ jobs:
       contents: read
       id-token: write
     env:
-      # Per-leg working directory, derived from this leg's stack — must match the
-      # plan job's derivation so apply operates in the same stack directory the
-      # plan was produced in. See the plan job's note; mirrors pr-validation.yml.
       stack-working-directory: terraform/stacks/${{ matrix.stack }}
+      account-id: ${{ fromJSON(secrets.deployment-accounts)[matrix.deployment] }}
     steps:
       - name: Checkout at version
         uses: actions/checkout@v4
@@ -261,29 +271,27 @@ jobs:
       - name: Terraform Init
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
-          account_id: ${{ secrets.account_id }}
+          account_id: ${{ env.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.apply-role }}
           state-bucket: ${{ inputs.state-bucket }}
           state-dynamodb-table: ${{ inputs.state-dynamodb-table }}
-          state-key: ${{ matrix.stack }}/${{ inputs.environment }}/terraform.tfstate
+          state-key: ${{ matrix.stack }}/${{ inputs.environment }}/${{ matrix.deployment }}/terraform.tfstate
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}
           use-backend: "true"
 
-      # Downloads terraform-plan-<stack>-<environment> (the plan job's artefact)
-      # and runs `terraform apply -input=false tfplan`. Missing/incomplete
-      # artefacts fail download-artifact; a stale plan is refused by Terraform's
-      # saved-plan apply; a no-op plan applies cleanly with no change. No custom
-      # missing/stale/no-op logic is needed here (see design error-handling table).
+      # Downloads this leg's plan artefact (keyed by stack+deployment+env) and
+      # runs `terraform apply tfplan`. A missing artefact fails download; a stale
+      # plan is refused by Terraform's saved-plan apply; a no-op applies cleanly.
       - name: Terraform Apply
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
         with:
-          account_id: ${{ secrets.account_id }}
+          account_id: ${{ env.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.apply-role }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.stack-working-directory }}
-          artifact-name: terraform-plan-${{ matrix.stack }}-${{ inputs.environment }}
+          artifact-name: terraform-plan-${{ matrix.stack }}-${{ matrix.deployment }}-${{ inputs.environment }}

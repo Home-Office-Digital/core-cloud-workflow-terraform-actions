@@ -1,0 +1,117 @@
+name: "Expand deployments"
+description: "Resolve stack and deployment selectors into a JSON include-list of {stack, deployment} pairs for a matrix, for one environment. A deployment is a tfvars file under <stack>/environments/<environment>/inputs/."
+
+inputs:
+  stack:
+    description: >-
+      Stack selector: a single name, a comma-separated list, or 'all' to use
+      every subdirectory of stacks-dir. 'all' is reserved.
+    required: false
+    default: "all"
+  deployment:
+    description: >-
+      Deployment selector: a single name, a comma-separated list, or 'all' for
+      every deployment present for the stack and environment. A deployment name
+      is a tfvars basename (tenant-1 for tenant-1.tfvars). 'all' is reserved.
+    required: false
+    default: "all"
+  environment:
+    description: "Environment whose deployments are enumerated (dev, test, prod)."
+    required: true
+  stacks-dir:
+    description: "Directory whose immediate subdirectories are the stacks."
+    required: false
+    default: "terraform/stacks"
+
+outputs:
+  include:
+    description: "JSON array of {stack, deployment} objects for a matrix include, e.g. [{\"stack\":\"stack-a\",\"deployment\":\"tenant-1\"}]."
+    value: ${{ steps.expand.outputs.include }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Expand stack and deployment selectors to a matrix include-list
+      id: expand
+      shell: bash
+      env:
+        STACK_INPUT: ${{ inputs.stack }}
+        DEPLOYMENT_INPUT: ${{ inputs.deployment }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        STACKS_DIR: ${{ inputs.stacks-dir }}
+      run: |
+        set -euo pipefail
+
+        # Split a comma selector into a bash array: trim, drop empties, dedupe
+        # keeping order. Copied from expand-stacks; 'all' is handled by callers.
+        parse_selector() {
+          local input="$1"
+          local -n out="$2"
+          out=()
+          local -A seen=()
+          local IFS=','
+          read -ra raw <<< "${input}"
+          local item trimmed
+          for item in "${raw[@]}"; do
+            trimmed="${item#"${item%%[![:space:]]*}"}"
+            trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+            [[ -z "${trimmed}" ]] && continue
+            [[ -n "${seen[${trimmed}]:-}" ]] && continue
+            seen[${trimmed}]=1
+            out+=("${trimmed}")
+          done
+        }
+
+        # Deployment names for a stack+environment: the tfvars basenames under
+        # environments/<env>/inputs/.
+        list_deployments() {
+          find "$1" -mindepth 1 -maxdepth 1 -type f -name '*.tfvars' -printf '%f\n' \
+            | sed 's/\.tfvars$//' | sort
+        }
+
+        # Resolve the stack list.
+        if [[ "${STACK_INPUT}" == "all" ]]; then
+          if [[ ! -d "${STACKS_DIR}" ]]; then
+            echo "::error::stack=all but stacks directory '${STACKS_DIR}' was not found."
+            exit 1
+          fi
+          mapfile -t stacks < <(find "${STACKS_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+        else
+          parse_selector "${STACK_INPUT}" stacks
+        fi
+        if [[ "${#stacks[@]}" -eq 0 ]]; then
+          echo "::error::stack selector '${STACK_INPUT}' resolved to no stacks."
+          exit 1
+        fi
+
+        # Build the {stack, deployment} include-list. A deployment that does not
+        # exist for a stack+environment is a hard error, not a silent skip.
+        include="[]"
+        for stack in "${stacks[@]}"; do
+          inputs_dir="${STACKS_DIR}/${stack}/environments/${ENVIRONMENT}/inputs"
+          if [[ ! -d "${inputs_dir}" ]]; then
+            echo "::error::stack '${stack}' has no inputs for environment '${ENVIRONMENT}' (expected ${inputs_dir})."
+            exit 1
+          fi
+
+          if [[ "${DEPLOYMENT_INPUT}" == "all" ]]; then
+            mapfile -t deployments < <(list_deployments "${inputs_dir}")
+          else
+            parse_selector "${DEPLOYMENT_INPUT}" deployments
+          fi
+          if [[ "${#deployments[@]}" -eq 0 ]]; then
+            echo "::error::no deployments (tfvars files) for stack '${stack}' in '${ENVIRONMENT}'."
+            exit 1
+          fi
+
+          for dep in "${deployments[@]}"; do
+            if [[ ! -f "${inputs_dir}/${dep}.tfvars" ]]; then
+              echo "::error::deployment '${dep}' not found for stack '${stack}' in '${ENVIRONMENT}' (expected ${inputs_dir}/${dep}.tfvars)."
+              exit 1
+            fi
+            include="$(jq -c --arg s "${stack}" --arg d "${dep}" '. += [{stack: $s, deployment: $d}]' <<< "${include}")"
+          done
+        done
+
+        echo "Resolved ${ENVIRONMENT} include-list: ${include}"
+        echo "include=${include}" >> "${GITHUB_OUTPUT}"

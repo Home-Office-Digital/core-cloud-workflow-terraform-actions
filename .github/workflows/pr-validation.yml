@@ -68,7 +68,22 @@ on:
         default: "."
         type: string
     secrets:
+      deployment-accounts:
+        description: >-
+          JSON object mapping a deployment to its AWS account ID, same format
+          and lookup as the deploy workflow: "<stack>/<deployment>" first, then
+          the bare "<deployment>" name as a fallback. Lets each validate leg
+          plan against the account that actually owns its state, so a PR plan
+          for a deployment in a non-default account reads the right state and
+          reports real drift. Optional: if omitted, every leg falls back to the
+          single `account_id` secret below.
+        required: false
       account_id:
+        description: >-
+          Deprecated single-account fallback. Used by a validate leg only when
+          `deployment-accounts` is absent or has no key for that leg. Prefer
+          `deployment-accounts` so validation matches the deploy workflow's
+          per-deployment account resolution.
         required: false
       role-to-assume:
         description: >-
@@ -140,11 +155,42 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Resolve this leg's account the same way the deploy workflow does:
+      # <stack>/<deployment> first, then the bare <deployment> name, from the
+      # deployment-accounts map. Done in a shell step because indexing a
+      # fromJSON'd secret in a `${{ }}` expression is unreliable. If no map is
+      # passed (or it has no key for this leg) fall back to the single account_id
+      # secret, so existing single-account callers keep working. Fails only when
+      # neither source yields an id, rather than emitting an invalid role ARN.
+      - name: Resolve account id
+        shell: bash
+        env:
+          DEPLOYMENT_ACCOUNTS: ${{ secrets.deployment-accounts }}
+          ACCOUNT_ID_FALLBACK: ${{ secrets.account_id }}
+          STACK: ${{ matrix.stack }}
+          DEPLOYMENT: ${{ matrix.deployment }}
+        run: |
+          set -euo pipefail
+          account=""
+          if [[ -n "${DEPLOYMENT_ACCOUNTS}" ]]; then
+            account="$(jq -r --arg k "${STACK}/${DEPLOYMENT}" --arg d "${DEPLOYMENT}" \
+              '.[$k] // .[$d] // ""' <<< "${DEPLOYMENT_ACCOUNTS}")"
+          fi
+          if [[ -z "${account}" ]]; then
+            account="${ACCOUNT_ID_FALLBACK}"
+          fi
+          if [[ -z "${account}" ]]; then
+            echo "::error::no account id for '${STACK}/${DEPLOYMENT}': deployment-accounts had no '${STACK}/${DEPLOYMENT}' or '${DEPLOYMENT}' key and no account_id fallback was set."
+            exit 1
+          fi
+          echo "::add-mask::${account}"
+          echo "account-id=${account}" >> "${GITHUB_ENV}"
+
       - name: Terraform Init
         id: init
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
-          account_id: ${{ secrets.account_id }}
+          account_id: ${{ env.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ secrets.role-to-assume }}
@@ -189,7 +235,7 @@ jobs:
         id: plan
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
-          account_id: ${{ secrets.account_id }}
+          account_id: ${{ env.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.github-environment }}
           role-to-assume: ${{ secrets.role-to-assume }}

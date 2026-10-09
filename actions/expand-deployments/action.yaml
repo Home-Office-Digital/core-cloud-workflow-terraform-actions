@@ -4,7 +4,7 @@
 # (minus .tfvars) is the deployment name. The number of deployments for a
 # stack+environment is just how many tfvars files sit in:
 #
-#   terraform/stacks/<stack>/environments/<environment>/inputs/*.tfvars
+#   terraform/stacks/<stack>/environments/<environment>/*.tfvars
 #
 # Given stack, deployment, and environment selectors (each a name, a comma
 # list, or 'all'), this emits one {stack, deployment} object per real tfvars.
@@ -19,7 +19,7 @@
 # A selected deployment with no tfvars file is a hard error, never a silent skip.
 
 name: "Expand deployments"
-description: "Resolve stack/deployment/environment selectors into a JSON {stack, deployment} include-list for a matrix. A deployment is a tfvars file under <stack>/environments/<environment>/inputs/."
+description: "Resolve stack/deployment/environment selectors into a JSON {stack, deployment} include-list for a matrix. A deployment is a tfvars file under <stack>/environments/<environment>/."
 
 inputs:
   stack:
@@ -78,7 +78,7 @@ runs:
         }
 
         # Deployment names for a stack+environment: the tfvars basenames under
-        # environments/<env>/inputs/.
+        # environments/<env>/.
         list_deployments() {
           find "$1" -maxdepth 1 -type f -name '*.tfvars' -printf '%f\n' \
             | sed 's/\.tfvars$//' | sort
@@ -100,14 +100,14 @@ runs:
         # exist for a stack+environment is a hard error, not a silent skip.
         include="[]"
         for stack in "${stacks[@]}"; do
-          inputs_dir="${STACKS_DIR}/${stack}/environments/${ENVIRONMENT}/inputs"
-          if [[ ! -d "${inputs_dir}" ]]; then
-            echo "::error::stack '${stack}' has no inputs for environment '${ENVIRONMENT}' (expected ${inputs_dir})."
+          env_dir="${STACKS_DIR}/${stack}/environments/${ENVIRONMENT}"
+          if [[ ! -d "${env_dir}" ]]; then
+            echo "::error::stack '${stack}' has no environment '${ENVIRONMENT}' (expected ${env_dir})."
             exit 1
           fi
 
           if [[ "${DEPLOYMENT_INPUT}" == "all" ]]; then
-            mapfile -t deployments < <(list_deployments "${inputs_dir}")
+            mapfile -t deployments < <(list_deployments "${env_dir}")
           else
             parse_selector "${DEPLOYMENT_INPUT}" deployments
           fi
@@ -119,8 +119,8 @@ runs:
           for dep in "${deployments[@]}"; do
             # Guards an explicit deployment selector (a typo'd or absent name);
             # always true for the 'all' path, where names come from real files.
-            if [[ ! -f "${inputs_dir}/${dep}.tfvars" ]]; then
-              echo "::error::deployment '${dep}' not found for stack '${stack}' in '${ENVIRONMENT}' (expected ${inputs_dir}/${dep}.tfvars)."
+            if [[ ! -f "${env_dir}/${dep}.tfvars" ]]; then
+              echo "::error::deployment '${dep}' not found for stack '${stack}' in '${ENVIRONMENT}' (expected ${env_dir}/${dep}.tfvars)."
               exit 1
             fi
             include="$(jq -c --arg s "${stack}" --arg d "${dep}" '. += [{stack: $s, deployment: $d}]' <<< "${include}")"

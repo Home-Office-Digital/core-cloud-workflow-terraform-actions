@@ -196,5 +196,5 @@ jobs:
           terraform-version: ${{ inputs.terraform-version }}
           # Per-leg tfvars, derived from the deployment, mirroring the deploy
           # workflow. Replaces the single `tfvars-file` caller input.
-          tfvars-file: environments/${{ inputs.github-environment }}/inputs/${{ matrix.deployment }}.tfvars
+          tfvars-file: environments/${{ inputs.github-environment }}/${{ matrix.deployment }}.tfvars
           working-directory: ${{ env.stack-working-directory }}

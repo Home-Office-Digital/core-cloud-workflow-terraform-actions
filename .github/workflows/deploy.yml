@@ -157,7 +157,7 @@ jobs:
       # feature branch until the POC merges to main.
       #
       # Produces a {stack, deployment} include-list for this environment: one
-      # entry per tfvars file under <stack>/environments/<env>/inputs/. dev/test
+      # entry per tfvars file under <stack>/environments/<env>/. dev/test
       # typically yield one deployment; prod fans out across several.
       - name: Expand stack and deployment selectors
         id: expand
@@ -245,7 +245,7 @@ jobs:
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.plan-role }}
           terraform-version: ${{ inputs.terraform-version }}
-          tfvars-file: environments/${{ inputs.environment }}/inputs/${{ matrix.deployment }}.tfvars
+          tfvars-file: environments/${{ inputs.environment }}/${{ matrix.deployment }}.tfvars
           working-directory: ${{ env.stack-working-directory }}
           artifact-name: terraform-plan-${{ matrix.stack }}-${{ matrix.deployment }}-${{ inputs.environment }}
   apply:

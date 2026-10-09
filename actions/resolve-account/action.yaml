@@ -1,0 +1,67 @@
+name: "Resolve account id"
+description: >-
+  Resolve a deployment's AWS account id from a deployment-accounts map. Looks up
+  "<stack>/<deployment>" first, then the bare "<deployment>" name, then an
+  optional single-account fallback. Fails if none yields an id, so a caller
+  never builds an invalid role ARN from an empty value. Shared by the deploy and
+  pr-validation workflows.
+
+# Why a shell lookup and not a `${{ fromJSON(secrets...)[key] }}` expression:
+# the map arrives as a secret, and GitHub's expression engine does not reliably
+# index a fromJSON'd secret (a composite-key lookup silently returned "" and
+# produced arn:aws:iam:::role/..., failing OIDC). In a shell step the map is an
+# ordinary env var and jq indexes it correctly.
+
+inputs:
+  deployment-accounts:
+    description: >-
+      JSON object mapping a deployment to its account id, e.g.
+      {"stack-a/test":"<id>","test":"<id>"}. May be empty, in which case only
+      the fallback is used.
+    required: false
+    default: ""
+  account-id-fallback:
+    description: >-
+      Single account id used when the map is empty or has no key for this
+      stack/deployment. Omit to require a map hit.
+    required: false
+    default: ""
+  stack:
+    description: "Stack name for this leg (first half of the composite key)."
+    required: true
+  deployment:
+    description: "Deployment name for this leg (bare key and second half of the composite key)."
+    required: true
+
+outputs:
+  account-id:
+    description: "The resolved AWS account id. Masked in logs."
+    value: ${{ steps.resolve.outputs.account-id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve account id
+      id: resolve
+      shell: bash
+      env:
+        DEPLOYMENT_ACCOUNTS: ${{ inputs.deployment-accounts }}
+        ACCOUNT_ID_FALLBACK: ${{ inputs.account-id-fallback }}
+        STACK: ${{ inputs.stack }}
+        DEPLOYMENT: ${{ inputs.deployment }}
+      run: |
+        set -euo pipefail
+        account=""
+        if [[ -n "${DEPLOYMENT_ACCOUNTS}" ]]; then
+          account="$(jq -r --arg k "${STACK}/${DEPLOYMENT}" --arg d "${DEPLOYMENT}" \
+            '.[$k] // .[$d] // ""' <<< "${DEPLOYMENT_ACCOUNTS}")"
+        fi
+        if [[ -z "${account}" ]]; then
+          account="${ACCOUNT_ID_FALLBACK}"
+        fi
+        if [[ -z "${account}" ]]; then
+          echo "::error::no account id for '${STACK}/${DEPLOYMENT}': deployment-accounts had no '${STACK}/${DEPLOYMENT}' or '${DEPLOYMENT}' key and no account-id-fallback was set."
+          exit 1
+        fi
+        echo "::add-mask::${account}"
+        echo "account-id=${account}" >> "${GITHUB_OUTPUT}"

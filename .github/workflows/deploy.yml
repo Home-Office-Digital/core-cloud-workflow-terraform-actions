@@ -198,35 +198,21 @@ jobs:
         with:
           ref: ${{ inputs.version }}
 
-      # Resolve this leg's account from the account-id map in a shell step, not
-      # a `${{ fromJSON(secrets...) }}` expression. The map arrives as a secret,
-      # and GitHub's expression engine does not reliably index a fromJSON'd
-      # secret: the lookup silently returned "" for composite keys, producing an
-      # invalid role ARN (arn:aws:iam:::role/...). In a shell step the secret is
-      # an ordinary env var and jq does the lookup correctly. Try
-      # <stack>/<deployment> first, fall back to the bare <deployment> name, and
-      # fail loudly if neither key is present rather than emitting an empty ARN.
+      # Resolve this leg's account from the deployment-accounts map:
+      # <stack>/<deployment> first, then the bare <deployment> name. Shared
+      # composite action, also used by the apply job and pr-validation.
       - name: Resolve account id
-        shell: bash
-        env:
-          DEPLOYMENT_ACCOUNTS: ${{ secrets.deployment-accounts }}
-          STACK: ${{ matrix.stack }}
-          DEPLOYMENT: ${{ matrix.deployment }}
-        run: |
-          set -euo pipefail
-          account="$(jq -r --arg k "${STACK}/${DEPLOYMENT}" --arg d "${DEPLOYMENT}" \
-            '.[$k] // .[$d] // ""' <<< "${DEPLOYMENT_ACCOUNTS}")"
-          if [[ -z "${account}" ]]; then
-            echo "::error::no account id for '${STACK}/${DEPLOYMENT}' (tried key '${STACK}/${DEPLOYMENT}' then '${DEPLOYMENT}') in DEPLOYMENT_ACCOUNTS."
-            exit 1
-          fi
-          echo "::add-mask::${account}"
-          echo "account-id=${account}" >> "${GITHUB_ENV}"
+        id: account
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/resolve-account@feature/add-new-terraform-workflows
+        with:
+          deployment-accounts: ${{ secrets.deployment-accounts }}
+          stack: ${{ matrix.stack }}
+          deployment: ${{ matrix.deployment }}
 
       - name: Terraform Init
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
-          account_id: ${{ env.account-id }}
+          account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.plan-role }}
@@ -240,7 +226,7 @@ jobs:
       - name: Terraform Plan
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@main
         with:
-          account_id: ${{ env.account-id }}
+          account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.plan-role }}
@@ -292,31 +278,19 @@ jobs:
         with:
           ref: ${{ inputs.version }}
 
-      # Same shell-based lookup as the plan job: index the account-id map with
-      # jq (<stack>/<deployment> first, then bare <deployment>) because indexing
-      # a fromJSON'd secret in a `${{ }}` expression is unreliable. See the plan
-      # job for the full rationale.
+      # Same resolution as the plan job, via the shared composite action.
       - name: Resolve account id
-        shell: bash
-        env:
-          DEPLOYMENT_ACCOUNTS: ${{ secrets.deployment-accounts }}
-          STACK: ${{ matrix.stack }}
-          DEPLOYMENT: ${{ matrix.deployment }}
-        run: |
-          set -euo pipefail
-          account="$(jq -r --arg k "${STACK}/${DEPLOYMENT}" --arg d "${DEPLOYMENT}" \
-            '.[$k] // .[$d] // ""' <<< "${DEPLOYMENT_ACCOUNTS}")"
-          if [[ -z "${account}" ]]; then
-            echo "::error::no account id for '${STACK}/${DEPLOYMENT}' (tried key '${STACK}/${DEPLOYMENT}' then '${DEPLOYMENT}') in DEPLOYMENT_ACCOUNTS."
-            exit 1
-          fi
-          echo "::add-mask::${account}"
-          echo "account-id=${account}" >> "${GITHUB_ENV}"
+        id: account
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/resolve-account@feature/add-new-terraform-workflows
+        with:
+          deployment-accounts: ${{ secrets.deployment-accounts }}
+          stack: ${{ matrix.stack }}
+          deployment: ${{ matrix.deployment }}
 
       - name: Terraform Init
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
         with:
-          account_id: ${{ env.account-id }}
+          account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.apply-role }}
@@ -333,7 +307,7 @@ jobs:
       - name: Terraform Apply
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@main
         with:
-          account_id: ${{ env.account-id }}
+          account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ secrets.apply-role }}

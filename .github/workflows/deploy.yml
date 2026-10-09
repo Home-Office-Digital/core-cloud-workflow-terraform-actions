@@ -70,11 +70,14 @@ on:
     secrets:
       deployment-accounts:
         description: >-
-          JSON object mapping deployment name to AWS account ID, e.g.
-          {"tenant-1":"<id>","dev":"<id>"}. Each leg looks up its own account by
-          its deployment name. Passed as a secret (callers source it from a repo
-          variable) so account IDs stay out of git. An account ID is not itself
-          a credential.
+          JSON object mapping a deployment to its AWS account ID. Each leg looks
+          up its account with two keys, in order: "<stack>/<deployment>" first,
+          then the bare "<deployment>" name as a fallback. Use the composite key
+          when the same deployment name must map to different accounts per stack;
+          use the bare name when a deployment shares one account across stacks,
+          e.g. {"stack-a/test":"<id>","test":"<id>","tenant-1":"<id>"}. Passed as
+          a secret (callers source it from a repo variable) so account IDs stay
+          out of git. An account ID is not itself a credential.
         required: true
       plan-role:
         description: "OIDC role name assumed by the plan job (the read-only Plan_Role). A role name is not sensitive, but it is passed as a secret because a reusable workflow cannot receive secrets-context values through its inputs."
@@ -189,14 +192,36 @@ jobs:
       id-token: write
     env:
       stack-working-directory: terraform/stacks/${{ matrix.stack }}
-      # Account for this leg, looked up from the deployment -> account-id map the
-      # caller passes (sourced from a repo variable, never committed to git).
-      account-id: ${{ fromJSON(secrets.deployment-accounts)[matrix.deployment] }}
     steps:
       - name: Checkout at version
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.version }}
+
+      # Resolve this leg's account from the account-id map in a shell step, not
+      # a `${{ fromJSON(secrets...) }}` expression. The map arrives as a secret,
+      # and GitHub's expression engine does not reliably index a fromJSON'd
+      # secret: the lookup silently returned "" for composite keys, producing an
+      # invalid role ARN (arn:aws:iam:::role/...). In a shell step the secret is
+      # an ordinary env var and jq does the lookup correctly. Try
+      # <stack>/<deployment> first, fall back to the bare <deployment> name, and
+      # fail loudly if neither key is present rather than emitting an empty ARN.
+      - name: Resolve account id
+        shell: bash
+        env:
+          DEPLOYMENT_ACCOUNTS: ${{ secrets.deployment-accounts }}
+          STACK: ${{ matrix.stack }}
+          DEPLOYMENT: ${{ matrix.deployment }}
+        run: |
+          set -euo pipefail
+          account="$(jq -r --arg k "${STACK}/${DEPLOYMENT}" --arg d "${DEPLOYMENT}" \
+            '.[$k] // .[$d] // ""' <<< "${DEPLOYMENT_ACCOUNTS}")"
+          if [[ -z "${account}" ]]; then
+            echo "::error::no account id for '${STACK}/${DEPLOYMENT}' (tried key '${STACK}/${DEPLOYMENT}' then '${DEPLOYMENT}') in DEPLOYMENT_ACCOUNTS."
+            exit 1
+          fi
+          echo "::add-mask::${account}"
+          echo "account-id=${account}" >> "${GITHUB_ENV}"
 
       - name: Terraform Init
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main
@@ -261,12 +286,32 @@ jobs:
       id-token: write
     env:
       stack-working-directory: terraform/stacks/${{ matrix.stack }}
-      account-id: ${{ fromJSON(secrets.deployment-accounts)[matrix.deployment] }}
     steps:
       - name: Checkout at version
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.version }}
+
+      # Same shell-based lookup as the plan job: index the account-id map with
+      # jq (<stack>/<deployment> first, then bare <deployment>) because indexing
+      # a fromJSON'd secret in a `${{ }}` expression is unreliable. See the plan
+      # job for the full rationale.
+      - name: Resolve account id
+        shell: bash
+        env:
+          DEPLOYMENT_ACCOUNTS: ${{ secrets.deployment-accounts }}
+          STACK: ${{ matrix.stack }}
+          DEPLOYMENT: ${{ matrix.deployment }}
+        run: |
+          set -euo pipefail
+          account="$(jq -r --arg k "${STACK}/${DEPLOYMENT}" --arg d "${DEPLOYMENT}" \
+            '.[$k] // .[$d] // ""' <<< "${DEPLOYMENT_ACCOUNTS}")"
+          if [[ -z "${account}" ]]; then
+            echo "::error::no account id for '${STACK}/${DEPLOYMENT}' (tried key '${STACK}/${DEPLOYMENT}' then '${DEPLOYMENT}') in DEPLOYMENT_ACCOUNTS."
+            exit 1
+          fi
+          echo "::add-mask::${account}"
+          echo "account-id=${account}" >> "${GITHUB_ENV}"
 
       - name: Terraform Init
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@main

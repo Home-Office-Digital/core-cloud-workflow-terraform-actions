@@ -118,6 +118,11 @@ jobs:
   governance:
     name: "Governance (${{ inputs.environment }})"
     runs-on: ubuntu-latest
+    # actions: read lets the gate check below read the target environment's
+    # protection rules via the REST API. Job-level permissions replace the
+    # workflow defaults, and this job needs neither contents nor id-token.
+    permissions:
+      actions: read
     steps:
       - name: Validate change request
         if: ${{ inputs.environment == 'prod' }}
@@ -133,6 +138,34 @@ jobs:
             echo "::error::Prod deployment rejected: change-request must match CHG<digits> (e.g. CHG123), or be 'bypass' for an incident."
             exit 1
           fi
+
+      # Verify the target GitHub Environment exists and has a required-reviewers
+      # protection rule. GitHub silently auto-creates an environment on first use
+      # with NO protection, so a deploy to an unconfigured environment would run
+      # ungated. Fail here, before any checkout or plan, if the gate is missing.
+      - name: Verify environment approval gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          # URL-encode any slashes in the environment name for the API path.
+          enc="${ENVIRONMENT//\//%2F}"
+          if ! body="$(gh api "repos/${REPO}/environments/${enc}" 2>/tmp/gh_err)"; then
+            if grep -qi 'Not Found' /tmp/gh_err; then
+              echo "::error::environment '${ENVIRONMENT}' is not configured in ${REPO}. GitHub would auto-create it ungated, so the apply approval gate would not apply. Create it with a required-reviewers rule before deploying."
+              exit 1
+            fi
+            echo "::error::could not read environment '${ENVIRONMENT}': $(cat /tmp/gh_err)"
+            exit 1
+          fi
+          if [[ "$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${body}")" -eq 0 ]]; then
+            echo "::error::environment '${ENVIRONMENT}' has no required-reviewers protection rule, so the apply would run ungated. Add required reviewers to the environment before deploying."
+            exit 1
+          fi
+          echo "environment '${ENVIRONMENT}' has a required-reviewers gate."
 
   # Fan-out expansion. Turns the `stack` input (single name, comma list, or
   # 'all') into a JSON array the plan and apply jobs consume as a matrix.
@@ -167,6 +200,36 @@ jobs:
           deployment: ${{ inputs.deployment }}
           environment: ${{ inputs.environment }}
           stacks-dir: ${{ inputs.working-directory }}/terraform/stacks
+
+      # Pre-flight the account map: every leg must resolve to an account id by
+      # <stack>/<deployment> or the bare <deployment> key. resolve-account
+      # enforces this per leg at run time, but checking the whole matrix here
+      # fails the run up front, listing every missing key at once, instead of
+      # failing leg by leg after plans have started.
+      - name: Verify account mapping for every deployment
+        shell: bash
+        env:
+          DEPLOYMENT_ACCOUNTS: ${{ secrets.deployment-accounts }}
+          INCLUDE: ${{ steps.expand.outputs.include }}
+        run: |
+          set -euo pipefail
+          # Default to an empty JSON object when no map is supplied. Assigned to
+          # its own var rather than a `${x:-{}}` default inline, which bash does
+          # not expand as a literal brace and would feed malformed JSON to jq.
+          map="${DEPLOYMENT_ACCOUNTS}"
+          [[ -z "${map}" ]] && map="{}"
+          missing=()
+          while IFS=$'\t' read -r stack dep; do
+            [[ -z "${stack}" ]] && continue
+            account="$(jq -r --arg k "${stack}/${dep}" --arg d "${dep}" \
+              '.[$k] // .[$d] // ""' <<< "${map}")"
+            [[ -z "${account}" ]] && missing+=("${stack}/${dep}")
+          done < <(jq -r '.[] | [.stack, .deployment] | @tsv' <<< "${INCLUDE}")
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            echo "::error::DEPLOYMENT_ACCOUNTS has no account id for: ${missing[*]}. Add a '<stack>/<deployment>' or bare '<deployment>' key for each before deploying."
+            exit 1
+          fi
+          echo "every deployment resolves to an account id."
 
   plan:
     name: "Plan ${{ matrix.stack }}/${{ matrix.deployment }} (${{ inputs.environment }})"

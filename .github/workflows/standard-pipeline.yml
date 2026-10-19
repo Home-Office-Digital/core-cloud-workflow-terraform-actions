@@ -132,6 +132,8 @@ jobs:
       INPUT_PRE_EXEC_SCRIPT: ${{ inputs.pre-exec-script }}
       GITHUB_APP_CLIENT_ID: ${{ secrets.github_app_client_id }}
       GITHUB_APP_PRIVATE_KEY: ${{ secrets.github_app_private_key }}
+      DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
+      DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
 
     permissions:
       contents: read

@@ -52,6 +52,53 @@ Craete a workflow file in your `.github/workflows` directory and populate with t
         secrets:
           account_id: ${{ secrets.ACCOUNT_ID }}
 
+### Optional Dynatrace Environment secrets
+
+For Terraform workloads using Dynatrace dashboard direct sharing, create these
+**Environment secrets** in the **calling repository**, under Settings → Environments
+→ the environment selected by `github-environment` (for example, `live-ops-tooling`):
+
+- `DYNATRACE_ENVIRONMENT_ID`: the Dynatrace environment ID used in the sharing API hostname.
+- `DYNATRACE_PLATFORM_TOKEN`: a platform token with the permissions required by the sharing API.
+
+The standard workflow exports both from `secrets`, **not `vars`**, into the job's
+shell environment, including Terraform plan and apply and their `local-exec`
+children. Provider credentials loaded from AWS Secrets Manager or Terraform
+configuration do **not** populate these shell variables.
+
+No caller workflow changes or secrets in this shared workflow repository are
+needed. The called job selects the caller repository's Environment; its secrets
+are available there without `workflow_call.secrets` declarations or explicit
+forwarding. Environment secrets take precedence over same-named secrets passed
+by the caller (including through `secrets: inherit`).
+
+Both secrets are optional for the generic pipeline; absent secrets resolve to
+empty strings. Workloads requiring direct sharing must configure both. To fail
+early for those workloads only, optionally use the existing `pre-exec-script`
+input under the caller's `with:` block:
+
+```yaml
+pre-exec-script: |
+  missing=0
+  for name in DYNATRACE_ENVIRONMENT_ID DYNATRACE_PLATFORM_TOKEN; do
+    if [ -z "${!name}" ]; then
+      echo "::error::Missing required secret: ${name}" >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    exit 1
+  fi
+```
+
+This check reports secret names only. Do not print credentials or persist them
+in plan artifacts or files. Standalone composite-action callers must supply
+their own shell environment; the generic apply action has no Dynatrace requirements.
+
+Missing shell exports are a confirmed workflow wiring gap, but an `HTTP 000`
+sharing failure alone does not establish the network root cause: DNS, TLS or
+connectivity failures can also produce it.
+
 ## Usage of composite actions
 Please refer to the [Terraform workflow file](https://github.com/Home-Office-Digital/core-cloud-workflow-terraform-actions/blob/main/.github/workflows/standard-pipeline.yml) for examples of using composite actions.
 NOTE: Running `terraform validate` has conditional logic to initialise the terraform code, so you don't need to add the `terraform init` fragment beforehand.

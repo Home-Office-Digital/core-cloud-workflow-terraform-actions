@@ -103,8 +103,6 @@ on:
     secrets:
       DYNATRACE_ENVIRONMENT_ID:
         required: false
-      DYNATRACE_PLATFORM_TOKEN:
-        required: false
       account_id:
         required: false
       git_auth_token:
@@ -133,7 +131,6 @@ jobs:
     environment: ${{ inputs.github-environment }}
     env:
       DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
-      DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
       TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
       INPUT_PRE_EXEC_SCRIPT: ${{ inputs.pre-exec-script }}
       GITHUB_APP_CLIENT_ID: ${{ secrets.github_app_client_id }}

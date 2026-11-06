@@ -1,0 +1,106 @@
+name: "Resolve leg config"
+description: "Resolve one leg's account id, roles, bucket and lock table from accounts.json by its full <component>/<env>/<deployment> key; fail if the entry or any field is missing."
+
+# Reads accounts.json from the checked-out repo and looks the leg up with jq. A
+# missing key is an explicit failure, unlike a ${{ fromJSON(...) }} expression,
+# which can return an empty string and let a typo run with no account.
+
+inputs:
+  accounts-file:
+    description: >-
+      Path to the committed accounts.json, relative to the checked-out repo.
+      A JSON object keyed by the full leg identity "<component>/<env>/<deployment>",
+      each value an object { account_id, plan_role_name, apply_role_name,
+      state_bucket_name, state_lock_table_name }. Exact lookup, no fallback.
+    required: true
+  component:
+    description: "Component name for this leg (first segment of the key)."
+    required: true
+  environment:
+    description: "Environment for this leg (second segment of the key)."
+    required: true
+  deployment:
+    description: "Deployment name for this leg (third segment of the key)."
+    required: true
+
+outputs:
+  account-id:
+    description: "The resolved AWS account id. Masked in logs."
+    value: ${{ steps.resolve.outputs.account-id }}
+  plan-role-name:
+    description: "The resolved read-only plan role name (name, not ARN)."
+    value: ${{ steps.resolve.outputs.plan-role-name }}
+  apply-role-name:
+    description: "The resolved apply role name (name, not ARN)."
+    value: ${{ steps.resolve.outputs.apply-role-name }}
+  state-bucket-name:
+    description: "The resolved Terraform state bucket name."
+    value: ${{ steps.resolve.outputs.state-bucket-name }}
+  state-lock-table-name:
+    description: "The resolved Terraform state lock table name."
+    value: ${{ steps.resolve.outputs.state-lock-table-name }}
+  state-key:
+    description: "The Terraform state key for this leg: <repo>/<component>/<env>/<deployment>/terraform.tfstate."
+    value: ${{ steps.resolve.outputs.state-key }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve leg config
+      id: resolve
+      shell: bash
+      env:
+        ACCOUNTS_FILE: ${{ inputs.accounts-file }}
+        COMPONENT: ${{ inputs.component }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        DEPLOYMENT: ${{ inputs.deployment }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! -f "${ACCOUNTS_FILE}" ]]; then
+          echo "::error::accounts file not found at '${ACCOUNTS_FILE}'."
+          exit 1
+        fi
+
+        key="${COMPONENT}/${ENVIRONMENT}/${DEPLOYMENT}"
+
+        # Exact lookup, no fallback: a missing entry or field fails the leg.
+        entry="$(jq -c --arg k "${key}" '.[$k] // empty' "${ACCOUNTS_FILE}")"
+        if [[ -z "${entry}" ]]; then
+          echo "::error::accounts.json has no entry for '${key}'. Add it with account_id, plan_role_name, apply_role_name, state_bucket_name and state_lock_table_name."
+          exit 1
+        fi
+
+        missing=()
+        for field in account_id plan_role_name apply_role_name state_bucket_name state_lock_table_name; do
+          value="$(jq -r --arg f "${field}" '.[$f] // ""' <<< "${entry}")"
+          if [[ -z "${value}" ]]; then
+            missing+=("${field}")
+          fi
+        done
+        if [[ "${#missing[@]}" -gt 0 ]]; then
+          echo "::error::accounts.json entry for '${key}' is missing: ${missing[*]}."
+          exit 1
+        fi
+
+        account_id="$(jq -r '.account_id' <<< "${entry}")"
+        plan_role_name="$(jq -r '.plan_role_name' <<< "${entry}")"
+        apply_role_name="$(jq -r '.apply_role_name' <<< "${entry}")"
+        state_bucket_name="$(jq -r '.state_bucket_name' <<< "${entry}")"
+        state_lock_table_name="$(jq -r '.state_lock_table_name' <<< "${entry}")"
+
+        # State key is repo-prefixed so repos sharing a bucket can't collide on an
+        # identical <component>/<env>/<deployment> key. GITHUB_REPOSITORY is
+        # owner/repo and always set, for every event type; take the repo name.
+        state_key="${GITHUB_REPOSITORY##*/}/${key}/terraform.tfstate"
+
+        # Mask the account id; role, bucket and table names are not secret.
+        echo "::add-mask::${account_id}"
+        {
+          echo "account-id=${account_id}"
+          echo "plan-role-name=${plan_role_name}"
+          echo "apply-role-name=${apply_role_name}"
+          echo "state-bucket-name=${state_bucket_name}"
+          echo "state-lock-table-name=${state_lock_table_name}"
+          echo "state-key=${state_key}"
+        } >> "${GITHUB_OUTPUT}"

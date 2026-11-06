@@ -1,0 +1,98 @@
+name: Cleanup Ephemeral
+
+# Tears down ephemeral pr-<n>-<deployment> workspaces. On-demand only.
+#   scope=all     reaps every workspace whose PR is closed or merged (always safe)
+#   scope=pr-<n>  tears down one PR's workspaces, any PR state (early teardown)
+# Two jobs: discover lists the in-scope workspaces (ungated, so the gate has
+# something to show); destroy pauses at the environment gate, then loops destroy
+# + delete. Splitting them lets the approver review the list before anything runs.
+on:
+  workflow_call:
+    inputs:
+      scope:
+        description: "'all' (closed/merged PRs) or 'pr-<n>' (one PR, any state)."
+        required: true
+        type: string
+      environment:
+        description: "The ephemeral (feedback) environment, e.g. dev."
+        required: true
+        type: string
+      aws-region:
+        description: "AWS region for the state backend."
+        required: false
+        type: string
+        default: "eu-west-2"
+      terraform-version:
+        description: "Terraform version to use."
+        required: false
+        type: string
+        default: "~1.7.0"
+      accounts-file:
+        description: >-
+          Path to the committed accounts.json (relative to the repo root), keyed
+          by "<component>/<env>/<deployment>". Cleanup reads account_id,
+          apply_role_name, and the state backend per leg.
+        required: false
+        type: string
+        default: "source/terraform/accounts.json"
+
+run-name: "cleanup ${{ inputs.scope }} in ${{ inputs.environment }}"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+jobs:
+  # Ungated: list the in-scope workspaces so the gate on destroy has something to
+  # review. The list is printed here and passed to destroy.
+  discover:
+    name: "Discover (${{ inputs.scope }})"
+    runs-on: ubuntu-latest
+    outputs:
+      workspaces: ${{ steps.discover.outputs.workspaces }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      # No Configure AWS credentials step: deployments may span accounts, so the
+      # action authenticates per leg into each leg's own account (see its header).
+      - name: Discover orphan workspaces
+        id: discover
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/discover-orphan-workspaces@feature/add-new-terraform-workflows
+        with:
+          scope: ${{ inputs.scope }}
+          environment: ${{ inputs.environment }}
+          accounts-file: ${{ inputs.accounts-file }}
+          aws-region: ${{ inputs.aws-region }}
+
+  # Gated: approved only after the discover list (above) has been reviewed. Skips
+  # cleanly when nothing is in scope. Loops destroy + delete, re-assuming each
+  # deployment's account.
+  destroy:
+    name: "Destroy (${{ inputs.scope }})"
+    needs: discover
+    if: ${{ needs.discover.outputs.workspaces != '' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: cleanup-ephemeral-${{ inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Destroy workspaces
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/destroy-workspaces@feature/add-new-terraform-workflows
+        with:
+          workspaces: ${{ needs.discover.outputs.workspaces }}
+          accounts-file: ${{ inputs.accounts-file }}
+          environment: ${{ inputs.environment }}
+          aws-region: ${{ inputs.aws-region }}
+          terraform-version: ${{ inputs.terraform-version }}

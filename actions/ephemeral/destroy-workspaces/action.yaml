@@ -1,0 +1,107 @@
+name: "Destroy workspaces"
+description: "Destroy and delete a list of ephemeral pr-* Terraform workspaces, authenticating per leg via OIDC."
+
+# Consumes the '<component> <deployment> <workspace>' list from
+# discover-orphan-workspaces and tears each one down: terraform destroy, then
+# workspace delete. One action looping the list, not a job per workspace, so
+# scope=all does not explode into a job per PR.
+#
+# Legs in one environment may span accounts, so it authenticates per leg via OIDC
+# into that leg's account and inits against that account's state bucket, the same
+# per-leg auth discover uses.
+
+inputs:
+  workspaces:
+    description: "Newline-separated '<component> <deployment> <workspace>' lines, as output by discover-orphan-workspaces. Empty means nothing to do."
+    required: true
+  accounts-file:
+    description: "Path to the committed accounts.json (relative to the checked-out repo), keyed '<component>/<env>/<deployment>'. The apply role, bucket, and lock table are read per leg from here."
+    required: true
+  environment:
+    description: "The ephemeral environment whose state and tfvars are used, e.g. dev."
+    required: true
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components."
+    required: false
+    default: "source/terraform/components"
+  aws-region:
+    description: "AWS region for the state backend."
+    required: false
+    default: "eu-west-2"
+  terraform-version:
+    description: "Terraform version to use."
+    required: false
+    default: "~1.7.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Destroy workspaces
+      shell: bash
+      env:
+        WORKSPACES: ${{ inputs.workspaces }}
+        ACCOUNTS_FILE: ${{ inputs.accounts-file }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+        AWS_REGION: ${{ inputs.aws-region }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! -f "${ACCOUNTS_FILE}" ]]; then
+          echo "::error::accounts file not found at '${ACCOUNTS_FILE}'."
+          exit 1
+        fi
+
+        while read -r component deployment workspace; do
+          [[ -z "${component}" ]] && continue
+          echo "::group::destroy ${component}/${deployment}/${workspace}"
+          dir="${COMPONENTS_DIR}/${component}"
+
+          # accounts.json entry for this leg. Destroy needs account_id,
+          # apply_role_name and state_bucket_name; the lock table is optional.
+          key="${component}/${ENVIRONMENT}/${deployment}"
+          entry="$(jq -c --arg k "${key}" '.[$k] // empty' "${ACCOUNTS_FILE}")"
+          if [[ -z "${entry}" ]]; then
+            echo "::error::accounts.json has no entry for ${key}; cannot destroy its workspaces."
+            exit 1
+          fi
+          account="$(jq -r '.account_id // ""' <<< "${entry}")"
+          apply_role_name="$(jq -r '.apply_role_name // ""' <<< "${entry}")"
+          state_bucket_name="$(jq -r '.state_bucket_name // ""' <<< "${entry}")"
+          state_lock_table_name="$(jq -r '.state_lock_table_name // ""' <<< "${entry}")"
+          if [[ -z "${account}" || -z "${apply_role_name}" || -z "${state_bucket_name}" ]]; then
+            echo "::error::accounts.json entry for ${key} is missing account_id, apply_role_name, or state_bucket_name."
+            exit 1
+          fi
+
+          # Assume this leg's account role via OIDC (see ../assume-leg-role.sh).
+          # Clear any previous leg's creds first so each leg starts clean.
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          IFS=$'\t' read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
+            < <("${{ github.action_path }}/../assume-leg-role.sh" "${account}" "${apply_role_name}" cleanup)
+          export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+          # Repo-name prefix matches the deploy workflow's state key, so cleanup
+          # targets the same state object. ${GITHUB_REPOSITORY##*/} is the repo name.
+          terraform -chdir="${dir}" init -input=false \
+            -backend-config="bucket=${state_bucket_name}" \
+            -backend-config="key=${GITHUB_REPOSITORY##*/}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            ${state_lock_table_name:+-backend-config="dynamodb_table=${state_lock_table_name}"} \
+            -reconfigure
+
+          terraform -chdir="${dir}" workspace select "${workspace}"
+          terraform -chdir="${dir}" destroy -auto-approve -input=false \
+            -var-file="environments/${ENVIRONMENT}/${deployment}.tfvars"
+
+          # Can't delete the workspace you're in; switch to default first.
+          terraform -chdir="${dir}" workspace select default
+          terraform -chdir="${dir}" workspace delete "${workspace}"
+          echo "::endgroup::"
+        done <<< "${WORKSPACES}"

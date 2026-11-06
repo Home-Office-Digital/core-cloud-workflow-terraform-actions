@@ -1,0 +1,59 @@
+name: "Verify account map"
+description: "Check every leg in the matrix has a complete accounts.json entry up front, failing once with all the gaps."
+
+inputs:
+  include:
+    description: >-
+      JSON array of {component, deployment} objects, the output of
+      expand-deployments.
+    required: true
+  environment:
+    description: "Environment for this run; the middle segment of each leg's key."
+    required: true
+  accounts-file:
+    description: >-
+      Path to the committed accounts.json, relative to the checked-out repo.
+      Keyed by "<component>/<env>/<deployment>", each value { account_id,
+      plan_role_name, apply_role_name, state_bucket_name, state_lock_table_name }.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Verify accounts.json has a complete entry for every deployment
+      shell: bash
+      env:
+        ACCOUNTS_FILE: ${{ inputs.accounts-file }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        INCLUDE: ${{ inputs.include }}
+      run: |
+        set -euo pipefail
+        if [[ ! -f "${ACCOUNTS_FILE}" ]]; then
+          echo "::error::accounts file not found at '${ACCOUNTS_FILE}'."
+          exit 1
+        fi
+
+        required=(account_id plan_role_name apply_role_name state_bucket_name state_lock_table_name)
+        problems=()
+        while IFS=$'\t' read -r component dep; do
+          [[ -z "${component}" ]] && continue
+          key="${component}/${ENVIRONMENT}/${dep}"
+          entry="$(jq -c --arg k "${key}" '.[$k] // empty' "${ACCOUNTS_FILE}")"
+          if [[ -z "${entry}" ]]; then
+            problems+=("${key} (no entry)")
+            continue
+          fi
+          miss=()
+          for field in "${required[@]}"; do
+            [[ -z "$(jq -r --arg f "${field}" '.[$f] // ""' <<< "${entry}")" ]] && miss+=("${field}")
+          done
+          [[ "${#miss[@]}" -gt 0 ]] && problems+=("${key} (missing: ${miss[*]})")
+        done < <(jq -r '.[] | [.component, .deployment] | @tsv' <<< "${INCLUDE}")
+
+        if [[ "${#problems[@]}" -gt 0 ]]; then
+          echo "::error::accounts.json is incomplete:"
+          for p in "${problems[@]}"; do echo "::error::  ${p}"; done
+          echo "::error::Each leg needs a '<component>/<env>/<deployment>' entry with: ${required[*]}."
+          exit 1
+        fi
+        echo "accounts.json has a complete entry for every deployment."

@@ -1,0 +1,59 @@
+name: "Verify preconditions"
+description: "Gate a deploy before any plan: the production change request is well-formed and the target environment has a required-reviewers rule."
+
+inputs:
+  environment:
+    description: "Target environment. The gate check reads this environment's protection rules."
+    required: true
+  change-request:
+    description: >-
+      Change reference. Checked only when environment is 'prod': must match
+      CHG<digits> (e.g. CHG123) or be the literal 'bypass'. 'bypass' waives only
+      this check, never the environment approval gate.
+    required: false
+    default: ""
+  github-token:
+    description: "Token with actions:read, used to read the environment's protection rules."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate change request
+      if: ${{ inputs.environment == 'prod' }}
+      shell: bash
+      env:
+        CHANGE_REQUEST: ${{ inputs.change-request }}
+      run: |
+        if [[ "${CHANGE_REQUEST}" == "bypass" ]]; then
+          echo "change-request bypassed for Prod; environment approval still applies."
+        elif [[ "${CHANGE_REQUEST}" =~ ^CHG[0-9]+$ ]]; then
+          echo "change-request ${CHANGE_REQUEST} accepted for Prod."
+        else
+          echo "::error::Prod deployment rejected: change-request must match CHG<digits> (e.g. CHG123), or be 'bypass' for an incident."
+          exit 1
+        fi
+
+    - name: Verify environment approval gate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      run: |
+        set -euo pipefail
+        # URL-encode any slashes in the environment name for the API path.
+        enc="${ENVIRONMENT//\//%2F}"
+        if ! body="$(gh api "repos/${REPO}/environments/${enc}" 2>/tmp/gh_err)"; then
+          if grep -qi 'Not Found' /tmp/gh_err; then
+            echo "::error::environment '${ENVIRONMENT}' is not configured in ${REPO}. GitHub would auto-create it ungated, so the apply approval gate would not apply. Create it with a required-reviewers rule before deploying."
+            exit 1
+          fi
+          echo "::error::could not read environment '${ENVIRONMENT}': $(cat /tmp/gh_err)"
+          exit 1
+        fi
+        if [[ "$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${body}")" -eq 0 ]]; then
+          echo "::error::environment '${ENVIRONMENT}' has no required-reviewers protection rule, so the apply would run ungated. Add required reviewers to the environment before deploying."
+          exit 1
+        fi
+        echo "environment '${ENVIRONMENT}' has a required-reviewers gate."

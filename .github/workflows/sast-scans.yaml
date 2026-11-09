@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   checkov-scan:
-    uses: Home-Office-Digital/core-cloud-workflow-checkov-sast-scan/.github/workflows/checkov-scan-base.yaml@348dc136396b96136ad008558ba6e31b9a6b64f2 #1.20.4
+    uses: Home-Office-Digital/core-cloud-workflow-checkov-sast-scan/.github/workflows/checkov-scan-base.yaml@f784ad62383723a06856bf5fb4ef1332ca25d8dc #1.22.3
   sonarqube-scanner:
     uses: Home-Office-Digital/core-cloud-workflow-sonarqube-scan/.github/workflows/sonarqube-scan.yaml@3f9613d4c02f2f84fb4982982c1b9cf8bf773579 #1.2.0
     secrets:

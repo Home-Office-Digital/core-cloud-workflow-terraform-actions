@@ -1,0 +1,198 @@
+name: Terraform PR Validation
+
+# Reusable PR validation workflow: the Terraform quality chain
+# (init -> fmt -> validate -> test -> plan), plan-only with the read-only
+# Plan_Role, so a PR can never change resources. No apply step, no apply role.
+#
+# Validates EVERY component on every PR rather than detecting which a PR touches:
+# `expand` enumerates the components root and the `validate` matrix runs one
+# leg per component. This surfaces knock-on effects of a shared-module change
+# without computing a dependency graph.
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        description: "AWS Region for the State Bucket and Resources"
+        default: eu-west-2
+        required: false
+        type: string
+      fmt-recursive:
+        description: "Whether to run terraform fmt recursively across subdirectories"
+        required: false
+        default: true
+        type: boolean
+      environment:
+        description: >-
+          Which environment's state each PR plan runs against (dev, test, or
+          prod). Validation is plan-only with no gate; this only picks the state
+          and backend to plan against, it does not deploy.
+        required: false
+        default: "dev"
+        type: string
+      components-dir:
+        description: >-
+          Root directory whose immediate subdirectories are the components to
+          validate. The `expand` job enumerates `<components-dir>/*` and the
+          `validate` matrix runs one leg per component.
+        required: false
+        default: "source/terraform/components"
+        type: string
+      terraform-version:
+        description: >-
+          Terraform version to use. The default suits simple components; a
+          component using newer syntax must override it (the POC caller passes
+          '>= 1.15.0').
+        required: false
+        default: "~1.7.0"
+        type: string
+      working-directory:
+        description: >-
+          Unused. The validate matrix derives each leg's working directory from
+          `components-dir` and the matrix component
+          (`<components-dir>/<component>`). Kept for interface compatibility.
+        required: false
+        default: "."
+        type: string
+      deployments-file:
+        description: >-
+          Path to the committed deployments.json (relative to the repo root), keyed
+          by "<component>/<env>/<deployment>". PR validation is plan-only, so it
+          uses account_id, plan_role_name, and the state backend per leg;
+          apply_role_name is unused.
+        required: false
+        type: string
+        default: "source/terraform/deployments.json"
+    secrets:
+      sonar_host_url:
+        required: false
+      sonar_token:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  id-token: write
+
+jobs:
+  # Validate deployments.json as a whole, then enumerate every {component,
+  # deployment} pair into the matrix the validate job fans out over. Both
+  # selectors are 'all' because validation covers everything.
+  expand:
+    name: "Expand deployments"
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.expand.outputs.include }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Whole-file check on every PR: broken or inconsistent deployments.json
+      # can't merge. Validates all entries, every environment, not just this run's.
+      - name: Validate deployments.json
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feature/add-new-terraform-workflows
+        with:
+          deployments-file: ${{ inputs.deployments-file }}
+          components-dir: ${{ inputs.components-dir }}
+
+      - name: Expand deployments
+        id: expand
+        # Pinned to the feature branch until the POC merges to main.
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@feature/add-new-terraform-workflows
+        with:
+          component: all
+          deployment: all
+          environment: ${{ inputs.environment }}
+          components-dir: ${{ inputs.components-dir }}
+
+  validate:
+    name: "Validate ${{ matrix.component }}/${{ matrix.deployment }}"
+    needs: expand
+    runs-on: ubuntu-latest
+    # No `environment:`: PR validation is plan-only and must never hit an approval
+    # gate. One leg per pair; fail-fast: false so one leg's failure still lets the
+    # others report their plan.
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.expand.outputs.include) }}
+
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+
+    env:
+      component-working-directory: ${{ inputs.components-dir }}/${{ matrix.component }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Resolve this leg's config from deployments.json by its full key. Plan-only,
+      # so only account_id, plan_role_name, and the state backend are used.
+      - name: Resolve leg config
+        id: account
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feature/add-new-terraform-workflows
+        with:
+          deployments-file: ${{ inputs.deployments-file }}
+          component: ${{ matrix.component }}
+          environment: ${{ inputs.environment }}
+          deployment: ${{ matrix.deployment }}
+
+      - name: Terraform Init
+        id: init
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feature/add-new-terraform-workflows
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.plan-role-name }}
+          state-bucket: ${{ steps.account.outputs.state-bucket-name }}
+          state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
+          # Same repo-prefixed key as the deploy workflow (from resolve-account),
+          # so the PR plan reads the state the deploy writes and shows real drift.
+          state-key: ${{ steps.account.outputs.state-key }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.component-working-directory }}
+
+      - name: Terraform Fmt
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@feature/add-new-terraform-workflows
+        with:
+          working-directory: ${{ env.component-working-directory }}
+          recursive: ${{ inputs.fmt-recursive }}
+          terraform-version: ${{ inputs.terraform-version }}
+
+      - name: Terraform Validate
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@feature/add-new-terraform-workflows
+        with:
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.component-working-directory }}
+
+      - name: Terraform Test
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@feature/add-new-terraform-workflows
+        with:
+          working-directory: ${{ env.component-working-directory }}
+          sonar-host-url: ${{ secrets.sonar_host_url }}
+          sonar-token: ${{ secrets.sonar_token }}
+
+      # Plan only, Plan_Role only. No apply step and no apply role, so validation
+      # can never change resources.
+      - name: Terraform Plan
+        id: plan
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@feature/add-new-terraform-workflows
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.plan-role-name }}
+          terraform-version: ${{ inputs.terraform-version }}
+          # Per-leg tfvars, as in the deploy workflow.
+          tfvars-file: environments/${{ inputs.environment }}/${{ matrix.deployment }}.tfvars
+          working-directory: ${{ env.component-working-directory }}
+          # Per-leg name so parallel legs don't all upload terraform-plan-file-<env>;
+          # matches the deploy workflow's scheme.
+          artifact-name: terraform-plan-${{ matrix.component }}-${{ matrix.deployment }}-${{ inputs.environment }}

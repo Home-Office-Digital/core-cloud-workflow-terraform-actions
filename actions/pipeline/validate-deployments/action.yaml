@@ -1,0 +1,22 @@
+name: "Validate deployments.json"
+description: "Validate the whole deployments.json up front: valid JSON, every entry complete, and every entry matched 1:1 to a tfvars file. Fails before any plan."
+
+inputs:
+  deployments-file:
+    description: "Path to the committed deployments.json, relative to the checked-out repo."
+    required: true
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components."
+    required: false
+    default: "source/terraform/components"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate deployments.json
+      shell: bash
+      env:
+        DEPLOYMENTS_FILE: ${{ inputs.deployments-file }}
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+      run: |
+        "${{ github.action_path }}/validate-deployments.sh" "${DEPLOYMENTS_FILE}" "${COMPONENTS_DIR}"

@@ -1,0 +1,134 @@
+name: "Expand deployments"
+description: "Turn component/deployment/environment selectors into the {component, deployment} matrix to fan out over."
+
+# A deployment is one tfvars file under <component>/environments/<environment>/;
+# its basename (minus .tfvars) is the deployment name. A selected deployment with
+# no tfvars file is a hard error, never a silent skip.
+#
+# Example (environment=prod), where component-a has app.tfvars and component-b has
+# app-tenant-1.tfvars and app-tenant-2.tfvars:
+#   component=all deployment=all ->
+#     [{component: component-a, deployment: app},
+#      {component: component-b, deployment: app-tenant-1},
+#      {component: component-b, deployment: app-tenant-2}]
+
+inputs:
+  component:
+    description: "Component name, comma list, or 'all' (every subdirectory of components-dir). 'all' is reserved."
+    required: false
+    default: "all"
+  deployment:
+    description: "Deployment name, comma list, or 'all' (every tfvars for the component+environment). 'all' is reserved."
+    required: false
+    default: "all"
+  environment:
+    description: "Environment to enumerate: dev, test, or prod."
+    required: true
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components."
+    required: false
+    default: "source/terraform/components"
+
+outputs:
+  include:
+    description: "JSON array of {component, deployment} objects for a matrix include, e.g. [{\"component\":\"component-a\",\"deployment\":\"app\"}]."
+    value: ${{ steps.expand.outputs.include }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Expand component and deployment selectors to a matrix include-list
+      id: expand
+      shell: bash
+      env:
+        COMPONENT_INPUT: ${{ inputs.component }}
+        DEPLOYMENT_INPUT: ${{ inputs.deployment }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+      run: |
+        set -euo pipefail
+
+        # Split a comma selector into a bash array: trim, drop empties, dedupe
+        # keeping order. 'all' is handled separately by the callers below.
+        parse_selector() {
+          local input="$1"
+          local -n out="$2"
+          out=()
+          local -A seen=()
+          local IFS=','
+          read -ra raw <<< "${input}"
+          local item trimmed
+          for item in "${raw[@]}"; do
+            # Strip leading then trailing whitespace (handles "a, b" spacing).
+            trimmed="${item#"${item%%[![:space:]]*}"}"
+            trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+            [[ -z "${trimmed}" ]] && continue
+            [[ -n "${seen[${trimmed}]:-}" ]] && continue
+            seen[${trimmed}]=1
+            out+=("${trimmed}")
+          done
+        }
+
+        # Component names: immediate subdirectories of the given dir.
+        list_components() {
+          find "$1" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+        }
+
+        # Deployment names: tfvars basenames in the given environment dir.
+        list_deployments() {
+          find "$1" -maxdepth 1 -type f -name '*.tfvars' -printf '%f\n' \
+            | sed 's/\.tfvars$//' | sort
+        }
+
+        # Names form state keys and ephemeral workspace names, so restrict them to
+        # lowercase, digits, and hyphens. $2 labels the kind in the error.
+        validate_name() {
+          [[ "$1" =~ ^[a-z0-9-]+$ ]] && return 0
+          echo "::error::invalid $2 name '$1': use lowercase letters, digits, and hyphens only."
+          exit 1
+        }
+
+        if [[ "${COMPONENT_INPUT}" == "all" ]]; then
+          mapfile -t components < <(list_components "${COMPONENTS_DIR}")
+        else
+          parse_selector "${COMPONENT_INPUT}" components
+        fi
+        # Empty means a missing/empty components-dir ('all') or an empty selector.
+        if [[ "${#components[@]}" -eq 0 ]]; then
+          echo "::error::component selector '${COMPONENT_INPUT}' resolved to no components under '${COMPONENTS_DIR}'."
+          exit 1
+        fi
+
+        include="[]"
+        for component in "${components[@]}"; do
+          validate_name "${component}" component
+          env_dir="${COMPONENTS_DIR}/${component}/environments/${ENVIRONMENT}"
+          if [[ ! -d "${env_dir}" ]]; then
+            echo "::error::component '${component}' has no environment '${ENVIRONMENT}' (expected ${env_dir})."
+            exit 1
+          fi
+
+          if [[ "${DEPLOYMENT_INPUT}" == "all" ]]; then
+            mapfile -t deployments < <(list_deployments "${env_dir}")
+          else
+            parse_selector "${DEPLOYMENT_INPUT}" deployments
+          fi
+          if [[ "${#deployments[@]}" -eq 0 ]]; then
+            echo "::error::no deployments (tfvars files) for component '${component}' in '${ENVIRONMENT}'."
+            exit 1
+          fi
+
+          for dep in "${deployments[@]}"; do
+            validate_name "${dep}" deployment
+            # Guards an explicit deployment selector (a typo'd or absent name);
+            # always true for the 'all' path, where names come from real files.
+            if [[ ! -f "${env_dir}/${dep}.tfvars" ]]; then
+              echo "::error::deployment '${dep}' not found for component '${component}' in '${ENVIRONMENT}' (expected ${env_dir}/${dep}.tfvars)."
+              exit 1
+            fi
+            include="$(jq -c --arg s "${component}" --arg d "${dep}" '. += [{component: $s, deployment: $d}]' <<< "${include}")"
+          done
+        done
+
+        echo "Resolved ${ENVIRONMENT} include-list: ${include}"
+        echo "include=${include}" >> "${GITHUB_OUTPUT}"

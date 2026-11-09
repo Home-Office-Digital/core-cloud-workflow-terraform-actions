@@ -1,0 +1,308 @@
+name: Terraform Deploy
+
+# Reusable deployment workflow. One dispatch fans out into one plan+gated-apply
+# leg per {component, deployment} for an environment, at a pinned version.
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: "Component selector: a single name, a comma list, or 'all'."
+        required: false
+        type: string
+        default: all
+      deployment:
+        description: >-
+          Deployment selector: a single name, a comma list, or 'all'. A
+          deployment is a tfvars file under each component's
+          environments/<environment>/; dev/test usually have one, prod several.
+        required: false
+        type: string
+        default: all
+      environment:
+        description: "Target environment: dev | test | prod."
+        required: true
+        type: string
+      version:
+        description: "Git ref to deploy: branch/tag/SHA for Dev; release tag for Test/Prod."
+        required: true
+        type: string
+      change-request:
+        description: >-
+          Prod only. Must match CHG<digits> (e.g. CHG123), or be the literal
+          `bypass` for an incident; any other value is rejected. `bypass` waives
+          only this check, never the Prod approval gate.
+        required: false
+        type: string
+        default: ""
+      ephemeral:
+        description: >-
+          Deploy into a throwaway per-PR Terraform workspace instead of the
+          shared state. Feedback tier only, and the branch must have an open PR.
+          Leave false for a normal deploy.
+        required: false
+        type: boolean
+        default: false
+      plan-only:
+        description: >-
+          Plan only: fan out and plan every selected leg with the read-only plan
+          role, then stop. No apply job runs, so there is no approval gate and no
+          change request is needed. Use it to produce a plan for change-control
+          evidence against any environment, including prod.
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: >-
+          Repo-root prefix for the components directory. The `expand` job joins
+          it with `source/terraform/components` to enumerate components. The plan
+          and apply jobs do not use it: they derive each leg's working directory
+          from the leg's component (`source/terraform/components/<component>`), so
+          it cannot vary per leg.
+        required: false
+        type: string
+        default: "."
+      aws-region:
+        description: "AWS Region for the state bucket and resources."
+        required: false
+        type: string
+        default: "eu-west-2"
+      terraform-version:
+        description: >-
+          Terraform version to use. The default suits simple components; a
+          component using newer syntax must override it (the POC caller passes
+          '>= 1.15.0').
+        required: false
+        type: string
+        default: "~1.7.0"
+      deployments-file:
+        description: >-
+          Path to the committed deployments.json (relative to the repo root), the
+          source of truth for each leg's account, roles, and state backend. Keyed
+          by "<component>/<env>/<deployment>" with values { account_id,
+          plan_role_name, apply_role_name, state_bucket_name,
+          state_lock_table_name }. The workflow checks out the repo and reads it;
+          nothing is passed as a secret because these are config, not credentials.
+        required: false
+        type: string
+        default: "source/terraform/deployments.json"
+
+run-name: "${{ inputs.plan-only && 'plan-only' || 'deploy' }} ${{ inputs.component }} to ${{ inputs.environment }} @ ${{ inputs.version }}"
+
+# No top-level `concurrency:`: it is per-run and cannot vary per matrix leg, so it
+# would serialise a whole fan-out into one queue. Each leg serialises itself via a
+# job-level `concurrency:` on plan and apply instead (see those jobs).
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Runs before any checkout, so a rejected deploy never touches Terraform code.
+  # plan needs preconditions and apply needs plan, so a failed check stops the run.
+  preconditions:
+    name: "Preconditions (${{ inputs.environment }})"
+    runs-on: ubuntu-latest
+    # actions: read lets the gate check read the environment's protection rules;
+    # pull-requests: read lets resolve-ephemeral look up the branch's open PR.
+    permissions:
+      actions: read
+      pull-requests: read
+    outputs:
+      # Empty on a normal deploy; the open PR number on an ephemeral one. The plan
+      # and apply jobs build pr-<n>-<deployment> workspace names from it.
+      pr-number: ${{ steps.ephemeral.outputs.pr-number }}
+    steps:
+      # Skipped for a plan-only run: the change-request and approval-gate checks
+      # both guard the apply, and plan-only has no apply job.
+      - name: Verify preconditions
+        if: ${{ !inputs.plan-only }}
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/verify-preconditions@feature/add-new-terraform-workflows
+        with:
+          environment: ${{ inputs.environment }}
+          version: ${{ inputs.version }}
+          change-request: ${{ inputs.change-request }}
+          github-token: ${{ github.token }}
+
+      # Ephemeral only: gate (feedback tier, open PR) and resolve the PR number.
+      - name: Resolve ephemeral
+        id: ephemeral
+        if: ${{ inputs.ephemeral }}
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/resolve-ephemeral@feature/add-new-terraform-workflows
+        with:
+          branch: ${{ inputs.version }}
+          environment: ${{ inputs.environment }}
+
+  # Turns the component/deployment selectors into the matrix the plan and apply
+  # jobs fan out over. Checks out the caller (at `version`) to enumerate tfvars
+  # for the 'all' case.
+  expand:
+    name: "Expand deployments"
+    needs: preconditions
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.expand.outputs.include }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      # Full-path ref (not ./actions): the caller's checkout has no actions/ dir.
+      - name: Expand deployments
+        id: expand
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@feature/add-new-terraform-workflows
+        with:
+          component: ${{ inputs.component }}
+          deployment: ${{ inputs.deployment }}
+          environment: ${{ inputs.environment }}
+          components-dir: ${{ inputs.working-directory }}/source/terraform/components
+
+      # Validate the whole deployments.json before any leg plans: valid JSON,
+      # every entry complete, every entry matched to a tfvars file.
+      - name: Validate deployments.json
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feature/add-new-terraform-workflows
+        with:
+          deployments-file: ${{ inputs.deployments-file }}
+          components-dir: ${{ inputs.working-directory }}/source/terraform/components
+
+  plan:
+    name: "Plan ${{ matrix.component }}/${{ matrix.deployment }} (${{ inputs.environment }})"
+    needs: [preconditions, expand]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.expand.outputs.include) }}
+    # Per-leg serialisation: a repeat of the same target queues; different targets
+    # run in parallel. Shared with the apply job so a target's plan and apply
+    # never overlap another run of itself. The workspace suffix keeps an ephemeral
+    # run in its own queue, separate from the shared-state run of the same target.
+    concurrency:
+      group: tf-${{ matrix.component }}-${{ matrix.deployment }}-${{ inputs.environment }}${{ inputs.ephemeral && format('-pr-{0}-{1}', needs.preconditions.outputs.pr-number, matrix.deployment) || '' }}
+      cancel-in-progress: false
+    # No `environment:`: the approval gate lives only on the apply job.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      component-working-directory: source/terraform/components/${{ matrix.component }}
+      # 'default', or pr-<n>-<deployment> when ephemeral; init selects it.
+      workspace: ${{ inputs.ephemeral && format('pr-{0}-{1}', needs.preconditions.outputs.pr-number, matrix.deployment) || 'default' }}
+      # Apply recomputes this identically to download the plan uploaded here. The
+      # ephemeral suffix (empty on a normal run) keeps the artifact distinct.
+      plan-artifact-name: terraform-plan-${{ matrix.component }}-${{ matrix.deployment }}-${{ inputs.environment }}${{ inputs.ephemeral && format('-pr-{0}-{1}', needs.preconditions.outputs.pr-number, matrix.deployment) || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Resolve leg config
+        id: account
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feature/add-new-terraform-workflows
+        with:
+          deployments-file: ${{ inputs.deployments-file }}
+          component: ${{ matrix.component }}
+          environment: ${{ inputs.environment }}
+          deployment: ${{ matrix.deployment }}
+
+      - name: Terraform Init
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feature/add-new-terraform-workflows
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.plan-role-name }}
+          state-bucket: ${{ steps.account.outputs.state-bucket-name }}
+          state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
+          state-key: ${{ steps.account.outputs.state-key }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.component-working-directory }}
+          use-backend: "true"
+          workspace: ${{ env.workspace }}
+
+      - name: Terraform Plan
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@feature/add-new-terraform-workflows
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.plan-role-name }}
+          terraform-version: ${{ inputs.terraform-version }}
+          tfvars-file: environments/${{ inputs.environment }}/${{ matrix.deployment }}.tfvars
+          working-directory: ${{ env.component-working-directory }}
+          artifact-name: ${{ env.plan-artifact-name }}
+  apply:
+    name: "Apply ${{ matrix.component }}/${{ matrix.deployment }} (${{ inputs.environment }})"
+    # Skipped for a plan-only run, so no apply and no approval gate; the plan job
+    # has already produced each leg's plan artifact.
+    if: ${{ !inputs.plan-only }}
+    needs: [preconditions, expand, plan]
+    runs-on: ubuntu-latest
+    # Matches the plan matrix so each leg consumes its own plan artefact.
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.expand.outputs.include) }}
+    # Same per-leg group as the plan job (see there).
+    concurrency:
+      group: tf-${{ matrix.component }}-${{ matrix.deployment }}-${{ inputs.environment }}${{ inputs.ephemeral && format('-pr-{0}-{1}', needs.preconditions.outputs.pr-number, matrix.deployment) || '' }}
+      cancel-in-progress: false
+    # `environment:` binds the job to the GitHub Environment, whose required-
+    # reviewers rule gates the apply. The gate is per environment per run: one
+    # approval releases every leg targeting this environment. Dispatch a specific
+    # component to approve a narrower set. `bypass` waives only the change-request
+    # check in preconditions, never this gate.
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      component-working-directory: source/terraform/components/${{ matrix.component }}
+      # Must match the plan job's workspace and plan-artifact-name exactly, so
+      # apply selects the same workspace and downloads the plan uploaded there.
+      workspace: ${{ inputs.ephemeral && format('pr-{0}-{1}', needs.preconditions.outputs.pr-number, matrix.deployment) || 'default' }}
+      plan-artifact-name: terraform-plan-${{ matrix.component }}-${{ matrix.deployment }}-${{ inputs.environment }}${{ inputs.ephemeral && format('-pr-{0}-{1}', needs.preconditions.outputs.pr-number, matrix.deployment) || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      # Same resolution as the plan job.
+      - name: Resolve leg config
+        id: account
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feature/add-new-terraform-workflows
+        with:
+          deployments-file: ${{ inputs.deployments-file }}
+          component: ${{ matrix.component }}
+          environment: ${{ inputs.environment }}
+          deployment: ${{ matrix.deployment }}
+
+      - name: Terraform Init
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feature/add-new-terraform-workflows
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.apply-role-name }}
+          state-bucket: ${{ steps.account.outputs.state-bucket-name }}
+          state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
+          state-key: ${{ steps.account.outputs.state-key }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.component-working-directory }}
+          use-backend: "true"
+          workspace: ${{ env.workspace }}
+
+      # Downloads this leg's plan artefact and runs `terraform apply tfplan`. A
+      # stale plan is refused by Terraform's saved-plan apply.
+      - name: Terraform Apply
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@feature/add-new-terraform-workflows
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.apply-role-name }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.component-working-directory }}
+          artifact-name: ${{ env.plan-artifact-name }}

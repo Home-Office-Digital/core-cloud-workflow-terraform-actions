@@ -204,6 +204,7 @@ jobs:
           state-bucket: ${{ steps.account.outputs.state-bucket-name }}
           state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
           state-key: ${{ steps.account.outputs.state-key }}
+          workspace-key-prefix: env:${{ github.event.repository.name }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.component-working-directory }}
           use-backend: "true"
@@ -277,6 +278,7 @@ jobs:
           state-bucket: ${{ steps.account.outputs.state-bucket-name }}
           state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
           state-key: ${{ steps.account.outputs.state-key }}
+          workspace-key-prefix: env:${{ github.event.repository.name }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.component-working-directory }}
           use-backend: "true"

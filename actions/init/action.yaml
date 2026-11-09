@@ -38,6 +38,11 @@ inputs:
     required: false
     type: string
     default: "terraform.tfstate"
+  workspace-key-prefix:
+    description: "S3 backend workspace_key_prefix. Leave unset for Terraform's default ('env:') — existing behaviour. Set a repo-scoped value (e.g. 'env:<repo>') to confine workspace listing to this repo in a shared bucket."
+    required: false
+    type: string
+    default: ""
   state-use-lockfile:
     description: "Whether to pass use_lockfile to the S3 backend as -backend-config, which enables S3 native state locking. Accepts 'true' or 'false'. Leave unset to omit the argument entirely, which is the existing behaviour. Terraform supports this alongside dynamodb_table so a migration can be staged."
     required: false
@@ -184,6 +189,10 @@ runs:
 
           if [ -n "${{ inputs.state-dynamodb-table }}" ]; then
             INIT_OPTS="$INIT_OPTS -backend-config='dynamodb_table=${{ inputs.state-dynamodb-table }}'"
+          fi
+
+          if [ -n "${{ inputs.workspace-key-prefix }}" ]; then
+            INIT_OPTS="$INIT_OPTS -backend-config='workspace_key_prefix=${{ inputs.workspace-key-prefix }}'"
           fi
 
           # Appended only when set, so a caller passing neither gets the previous

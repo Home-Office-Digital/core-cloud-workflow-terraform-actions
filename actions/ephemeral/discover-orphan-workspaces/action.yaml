@@ -123,14 +123,19 @@ runs:
               -backend-config="bucket=${state_bucket_name}" \
               -backend-config="key=${GITHUB_REPOSITORY##*/}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
               -backend-config="region=${STATE_REGION}" \
+              -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}" \
               ${state_lock_table_name:+-backend-config="dynamodb_table=${state_lock_table_name}"} \
               -reconfigure >/dev/null
+
+            # Captured, not piped into the loop, so a failed list aborts rather than
+            # reading as empty. sed strips the "* " marker on the active workspace.
+            ws_list="$(terraform -chdir="${dir}" workspace list | sed 's/^[* ]*//')"
 
             while IFS= read -r ws; do
               [[ "${ws}" =~ ^pr-([0-9]+)-${deployment}$ ]] || continue
               in_scope "${BASH_REMATCH[1]}" || continue
               out+="${component} ${deployment} ${ws}"$'\n'
-            done < <(terraform -chdir="${dir}" workspace list | sed 's/^[* ]*//' | grep -E '^pr-' || true)
+            done <<< "${ws_list}"
           done
         done
 

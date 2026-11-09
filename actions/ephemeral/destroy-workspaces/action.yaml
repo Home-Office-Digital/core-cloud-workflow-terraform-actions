@@ -89,6 +89,7 @@ runs:
             -backend-config="bucket=${state_bucket_name}" \
             -backend-config="key=${GITHUB_REPOSITORY##*/}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
             -backend-config="region=${AWS_REGION}" \
+            -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}" \
             ${state_lock_table_name:+-backend-config="dynamodb_table=${state_lock_table_name}"} \
             -reconfigure
 

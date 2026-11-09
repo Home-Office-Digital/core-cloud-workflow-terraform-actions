@@ -29,21 +29,21 @@ if ! jq -e 'type == "object"' "${DEPLOYMENTS_FILE}" >/dev/null 2>&1; then
   exit 1
 fi
 
-# 2. Every entry has every required field, non-empty. jq reports "<key>: <field>"
-#    for each missing or empty field, across the whole file. The field names go
-#    in as a JSON array so jq can iterate them.
+# 2. Every entry must be an object with all required fields present and non-empty.
 required_json="$(jq -n '$ARGS.positional' --args "${REQUIRED_FIELDS[@]}")"
-while IFS= read -r line; do
-  [[ -n "${line}" ]] && problems+=("missing or empty field — ${line}")
-done < <(
+field_problems="$(
   jq -r --argjson required "${required_json}" '
     to_entries[]
     | .key as $k | .value as $v
-    | $required[]
-    | select(($v[.] // "") == "")
-    | "\($k): \(.)"
+    | if ($v | type) != "object"
+      then "\($k): entry is not an object"
+      else $required[] | select(($v[.] // "") == "") | "\($k): missing or empty field \(.)"
+      end
   ' "${DEPLOYMENTS_FILE}"
-)
+)"
+while IFS= read -r line; do
+  [[ -n "${line}" ]] && problems+=("${line}")
+done <<< "${field_problems}"
 
 # 3. The entries and the tfvars files must match 1:1. A key is
 #    <component>/<env>/<deployment>; its tfvars lives at

@@ -1,0 +1,157 @@
+name: Terraform Ephemeral Cleanup
+
+# Tears down ephemeral pr-<n>-<deployment> workspaces.
+#   scope=all     closed/merged PRs only
+#   scope=pr-<n>  one PR, any state
+# Ungated: discover only lists pr-* workspaces and the guard confines it to the
+# dev-environment, so it reaches no shared or prod state. A scheduled scope=all caller runs unattended.
+on:
+  workflow_call:
+    inputs:
+      scope:
+        description: "'all' (closed/merged PRs) or 'pr-<n>' (one PR, any state)."
+        required: true
+        type: string
+      environment:
+        description: "The ephemeral environment to clean up. Must equal dev-environment; any other value is rejected."
+        required: true
+        type: string
+      dev-environment:
+        description: "Name of the environment that hosts ephemeral workspaces. Must match the dev-environment passed to deploy.yml."
+        required: false
+        type: string
+        default: "dev"
+      aws-region:
+        description: "AWS region for the state backend."
+        required: false
+        type: string
+        default: "eu-west-2"
+      terraform-version:
+        description: "Terraform version to use. S3-native state locking needs 1.10+."
+        required: false
+        type: string
+        default: ">= 1.10.0"
+      deployments-file:
+        description: >-
+          Path to the committed deployments.json (relative to the repo root), keyed
+          by "<component>/<env>/<deployment>". Cleanup reads account_id,
+          apply_role_name, and the state backend per leg.
+        required: false
+        type: string
+        default: "source/terraform/deployments.json"
+      pre-exec-script:
+        description: "Optional shell script run before terraform init in every job that runs init (each Plan/Apply/Validate leg and cleanup job). Same as standard-pipeline's pre-exec-script. GITHUB_TOKEN, COMPONENT, DEPLOYMENT and ENVIRONMENT are set."
+        required: false
+        type: string
+        default: ""
+      runner:
+        description: "Runner label for the jobs that run Terraform against real providers (plan, apply, PR validate legs, cleanup). Bookkeeping jobs stay on ubuntu-latest. Same as standard-pipeline's runner."
+        required: false
+        default: "ubuntu-latest"
+        type: string
+    secrets:
+      github_app_client_id:
+        description: "GitHub App client ID for private module sources, as in standard-pipeline."
+        required: false
+      github_app_private_key:
+        description: "GitHub App private key for private module sources, as in standard-pipeline."
+        required: false
+      git_auth_token:
+        description: "Token for private module sources, as in standard-pipeline."
+        required: false
+      DYNATRACE_ENVIRONMENT_ID:
+        required: false
+      DYNATRACE_PLATFORM_TOKEN:
+        required: false
+
+run-name: "cleanup ${{ inputs.scope }} in ${{ inputs.environment }}"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+jobs:
+  # Guards the environment before any AWS access, then lists the pr-* workspaces
+  # to destroy.
+  discover:
+    name: "Discover (${{ inputs.scope }})"
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      workspaces: ${{ steps.discover.outputs.workspaces }}
+    steps:
+      - name: Guard environment
+        shell: bash
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          DEV_ENVIRONMENT: ${{ inputs.dev-environment }}
+        run: |
+          if [[ -z "${DEV_ENVIRONMENT}" || "${ENVIRONMENT}" != "${DEV_ENVIRONMENT}" ]]; then
+            echo "::error::cleanup runs only in the ephemeral environment '${DEV_ENVIRONMENT}'; got '${ENVIRONMENT}'. It never touches shared or prod state."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Pre-exec
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/pre-exec@feature/add-new-terraform-workflows
+        with:
+          github-app-client-id: ${{ secrets.github_app_client_id }}
+          github-app-private-key: ${{ secrets.github_app_private_key }}
+          git-auth-token: ${{ secrets.git_auth_token }}
+          script: ${{ inputs.pre-exec-script }}
+          environment: ${{ inputs.environment }}
+
+      # No Configure AWS credentials step: deployments may span accounts, so the
+      # action authenticates per leg into each leg's own account (see its header).
+      - name: Discover orphan workspaces
+        id: discover
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/discover-orphan-workspaces@feature/add-new-terraform-workflows
+        with:
+          scope: ${{ inputs.scope }}
+          environment: ${{ inputs.environment }}
+          deployments-file: ${{ inputs.deployments-file }}
+          aws-region: ${{ inputs.aws-region }}
+
+  # Loops destroy + delete over the workspaces discover listed, re-assuming each
+  # leg's account. Skips when none are in scope.
+  destroy:
+    name: "Destroy (${{ inputs.scope }})"
+    needs: discover
+    if: ${{ needs.discover.outputs.workspaces != '' }}
+    runs-on: ${{ inputs.runner }}
+    concurrency:
+      group: cleanup-ephemeral-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      # Dynatrace provider credentials, as in standard-pipeline; empty when not passed.
+      DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
+      DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pre-exec
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/pre-exec@feature/add-new-terraform-workflows
+        with:
+          github-app-client-id: ${{ secrets.github_app_client_id }}
+          github-app-private-key: ${{ secrets.github_app_private_key }}
+          git-auth-token: ${{ secrets.git_auth_token }}
+          script: ${{ inputs.pre-exec-script }}
+          environment: ${{ inputs.environment }}
+
+      - name: Destroy workspaces
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/destroy-workspaces@feature/add-new-terraform-workflows
+        with:
+          workspaces: ${{ needs.discover.outputs.workspaces }}
+          deployments-file: ${{ inputs.deployments-file }}
+          environment: ${{ inputs.environment }}
+          aws-region: ${{ inputs.aws-region }}
+          terraform-version: ${{ inputs.terraform-version }}

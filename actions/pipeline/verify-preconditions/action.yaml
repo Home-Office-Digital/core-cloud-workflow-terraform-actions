@@ -1,0 +1,62 @@
+name: "Verify preconditions"
+description: "Gate a deploy before any plan: the version is an allowed ref and the target environment has a required-reviewers rule."
+
+inputs:
+  environment:
+    description: "Target environment. The gate check reads this environment's protection rules."
+    required: true
+  version:
+    description: >-
+      Git ref being deployed. For test and prod it must be main, master, or a
+      semver tag (v1.2.3 or 1.2.3, with an optional pre-release suffix such as
+      -rc.1), keeping them off arbitrary branches; the dev environment accepts
+      any ref.
+    required: false
+    default: ""
+  dev-environment:
+    description: "Name of the dev environment, which skips the version check."
+    required: false
+    default: "dev"
+  github-token:
+    description: "Token with actions:read, used to read the environment's protection rules."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate version
+      if: ${{ inputs.environment != inputs.dev-environment }}
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        pattern='^(main|master|v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)$'
+        if [[ ! "${VERSION}" =~ ${pattern} ]]; then
+          echo "::error::${ENVIRONMENT} deployment rejected: version must be main, master, or a semver tag (v1.2.3, 1.2.3, or with a pre-release suffix such as v1.2.3-rc.1); got '${VERSION}'."
+          exit 1
+        fi
+
+    - name: Verify environment approval gate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      run: |
+        set -euo pipefail
+        # URL-encode any slashes in the environment name for the API path.
+        enc="${ENVIRONMENT//\//%2F}"
+        if ! body="$(gh api "repos/${REPO}/environments/${enc}" 2>/tmp/gh_err)"; then
+          if grep -qi 'Not Found' /tmp/gh_err; then
+            echo "::error::environment '${ENVIRONMENT}' is not configured in ${REPO}. GitHub would auto-create it ungated, so the apply approval gate would not apply. Create it with a required-reviewers rule before deploying."
+            exit 1
+          fi
+          echo "::error::could not read environment '${ENVIRONMENT}': $(cat /tmp/gh_err)"
+          exit 1
+        fi
+        if [[ "$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${body}")" -eq 0 ]]; then
+          echo "::error::environment '${ENVIRONMENT}' has no required-reviewers protection rule, so the apply would run ungated. Add required reviewers to the environment before deploying."
+          exit 1
+        fi
+        echo "environment '${ENVIRONMENT}' has a required-reviewers gate."

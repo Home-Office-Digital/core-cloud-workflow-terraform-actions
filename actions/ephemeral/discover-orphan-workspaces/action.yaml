@@ -1,0 +1,149 @@
+name: "Discover orphan workspaces"
+description: "List ephemeral pr-* workspaces to tear down, by scope, as newline-separated '<component> <deployment> <workspace>' lines."
+
+# Ephemeral workspaces are named pr-<n>-<deployment>. terraform workspace list is
+# key-scoped, so this inits each <component>/<environment>/<deployment> key and
+# lists that deployment's workspaces. Scope decides which to keep:
+#   all     -> only workspaces whose PR is closed or merged
+#   pr-<n>  -> that PR's workspaces, any PR state
+#
+# Legs may span accounts, so it authenticates per leg via OIDC before listing (as
+# destroy-workspaces does). Read-only: lists state, reads PR state via gh.
+
+inputs:
+  scope:
+    description: "'all' (closed/merged PRs) or 'pr-<n>' (one PR, any state)."
+    required: true
+  environment:
+    description: "The ephemeral environment whose deployments are scanned, e.g. dev."
+    required: true
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components."
+    required: false
+    default: "source/terraform/components"
+  deployments-file:
+    description: "Path to the committed deployments.json (relative to the checked-out repo), keyed '<component>/<env>/<deployment>'. The apply role, bucket, and lock table are read per leg from here."
+    required: true
+  aws-region:
+    description: "AWS region for the state backend."
+    required: false
+    default: "eu-west-2"
+
+outputs:
+  workspaces:
+    description: "Newline-separated '<component> <deployment> <workspace>' lines to destroy. Empty if none."
+    value: ${{ steps.discover.outputs.workspaces }}
+
+runs:
+  using: composite
+  steps:
+    - name: Discover orphan workspaces
+      id: discover
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        SCOPE: ${{ inputs.scope }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+        DEPLOYMENTS_FILE: ${{ inputs.deployments-file }}
+        STATE_REGION: ${{ inputs.aws-region }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! -f "${DEPLOYMENTS_FILE}" ]]; then
+          echo "::error::deployments file not found at '${DEPLOYMENTS_FILE}'."
+          exit 1
+        fi
+
+        if [[ "${SCOPE}" != "all" && ! "${SCOPE}" =~ ^pr-[0-9]+$ ]]; then
+          echo "::error::scope must be 'all' or 'pr-<number>'; got '${SCOPE}'."
+          exit 1
+        fi
+
+        # Cache each PR's open/closed decision so gh is queried once per PR.
+        declare -A pr_destroy=()
+
+        # Whether a workspace's PR means "destroy it", per scope.
+        in_scope() {
+          local pr="$1"
+          if [[ "${SCOPE}" == pr-* ]]; then
+            [[ "pr-${pr}" == "${SCOPE}" ]]
+            return
+          fi
+          # scope=all: only closed/merged PRs. Fail closed (keep) if unreadable.
+          if [[ -z "${pr_destroy[$pr]:-}" ]]; then
+            local state
+            if state="$(gh pr view "${pr}" --repo "${REPO}" --json state --jq '.state' 2>/dev/null)"; then
+              [[ "${state}" == "CLOSED" || "${state}" == "MERGED" ]] && pr_destroy[$pr]=yes || pr_destroy[$pr]=no
+            else
+              echo "could not read PR ${pr}; keeping its workspaces." >&2
+              pr_destroy[$pr]=no
+            fi
+          fi
+          [[ "${pr_destroy[$pr]}" == "yes" ]]
+        }
+
+        out=""
+        for dir in "${COMPONENTS_DIR}"/*/; do
+          [[ -d "${dir}" ]] || continue
+          component="$(basename "${dir}")"
+          env_dir="${dir}environments/${ENVIRONMENT}"
+          [[ -d "${env_dir}" ]] || continue
+
+          # workspace list is key-scoped, so init each deployment's real key.
+          for tfvars in "${env_dir}"/*.tfvars; do
+            [[ -e "${tfvars}" ]] || continue
+            deployment="$(basename "${tfvars}" .tfvars)"
+
+            # validate-deployments already checked the whole file, so just read
+            # the entry. The guard is a cheap backstop if that pre-flight was skipped.
+            key="${component}/${ENVIRONMENT}/${deployment}"
+            entry="$(jq -c --arg k "${key}" '.[$k] // empty' "${DEPLOYMENTS_FILE}")"
+            if [[ -z "${entry}" || -z "$(jq -r '.account_id // ""' <<< "${entry}")" ]]; then
+              echo "::error::deployments.json has no usable entry for ${key}. Run validate-deployments to see why."
+              exit 1
+            fi
+            account="$(jq -r '.account_id' <<< "${entry}")"
+            apply_role_name="$(jq -r '.apply_role_name' <<< "${entry}")"
+            state_bucket_name="$(jq -r '.state_bucket_name' <<< "${entry}")"
+            state_lock_table_name="$(jq -r '.state_lock_table_name' <<< "${entry}")"
+
+            # Each leg's state is in its own account, so assume that account's
+            # role before listing (see ../assume-leg-role.sh). Clear the previous
+            # leg's creds first.
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+            IFS=$'\t' read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
+              < <("${{ github.action_path }}/../assume-leg-role.sh" "${account}" "${apply_role_name}" discover)
+            export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+            # Repo-name prefix matches the deploy workflow's state key.
+            # ${GITHUB_REPOSITORY##*/} is the repo name.
+            terraform -chdir="${dir}" init -input=false \
+              -backend-config="bucket=${state_bucket_name}" \
+              -backend-config="key=${GITHUB_REPOSITORY##*/}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
+              -backend-config="region=${STATE_REGION}" \
+              -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}" \
+              ${state_lock_table_name:+-backend-config="dynamodb_table=${state_lock_table_name}"} \
+              -reconfigure >/dev/null
+
+            # Captured, not piped into the loop, so a failed list aborts rather than
+            # reading as empty. sed strips the "* " marker on the active workspace.
+            ws_list="$(terraform -chdir="${dir}" workspace list | sed 's/^[* ]*//')"
+
+            while IFS= read -r ws; do
+              [[ "${ws}" =~ ^pr-([0-9]+)-${deployment}$ ]] || continue
+              in_scope "${BASH_REMATCH[1]}" || continue
+              out+="${component} ${deployment} ${ws}"$'\n'
+            done <<< "${ws_list}"
+          done
+        done
+
+        out="${out%$'\n'}"
+        echo "Workspaces to destroy (${SCOPE}):"
+        echo "${out:-  (none)}"
+        {
+          echo "workspaces<<EOF"
+          echo "${out}"
+          echo "EOF"
+        } >> "${GITHUB_OUTPUT}"

@@ -51,16 +51,6 @@ on:
         required: false
         type: boolean
         default: false
-      working-directory:
-        description: >-
-          Repo-root prefix for the components directory. The `expand` job joins
-          it with `source/terraform/components` to enumerate components. The plan
-          and apply jobs do not use it: they derive each leg's working directory
-          from the leg's component (`source/terraform/components/<component>`), so
-          it cannot vary per leg.
-        required: false
-        type: string
-        default: "."
       aws-region:
         description: "AWS Region for the state bucket and resources."
         required: false
@@ -155,7 +145,6 @@ jobs:
           component: ${{ inputs.component }}
           deployment: ${{ inputs.deployment }}
           environment: ${{ inputs.environment }}
-          components-dir: ${{ inputs.working-directory }}/source/terraform/components
 
       # Validate the whole deployments.json before any leg plans: valid JSON,
       # every entry complete, every entry matched to a tfvars file.
@@ -163,7 +152,6 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feature/add-new-terraform-workflows
         with:
           deployments-file: ${{ inputs.deployments-file }}
-          components-dir: ${{ inputs.working-directory }}/source/terraform/components
 
   plan:
     name: "Plan ${{ matrix.component }}/${{ matrix.deployment }} (${{ inputs.environment }})"

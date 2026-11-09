@@ -30,14 +30,6 @@ on:
         required: false
         default: "dev"
         type: string
-      components-dir:
-        description: >-
-          Root directory whose immediate subdirectories are the components to
-          validate. The `expand` job enumerates `<components-dir>/*` and the
-          `validate` matrix runs one leg per component.
-        required: false
-        default: "source/terraform/components"
-        type: string
       terraform-version:
         description: >-
           Terraform version to use. The default suits simple components; a
@@ -45,14 +37,6 @@ on:
           '>= 1.15.0').
         required: false
         default: "~1.7.0"
-        type: string
-      working-directory:
-        description: >-
-          Unused. The validate matrix derives each leg's working directory from
-          `components-dir` and the matrix component
-          (`<components-dir>/<component>`). Kept for interface compatibility.
-        required: false
-        default: "."
         type: string
       deployments-file:
         description: >-
@@ -93,7 +77,6 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feature/add-new-terraform-workflows
         with:
           deployments-file: ${{ inputs.deployments-file }}
-          components-dir: ${{ inputs.components-dir }}
 
       - name: Expand deployments
         id: expand
@@ -103,7 +86,6 @@ jobs:
           component: all
           deployment: all
           environment: ${{ inputs.environment }}
-          components-dir: ${{ inputs.components-dir }}
 
   validate:
     name: "Validate ${{ matrix.component }}/${{ matrix.deployment }}"
@@ -123,7 +105,7 @@ jobs:
       id-token: write
 
     env:
-      component-working-directory: ${{ inputs.components-dir }}/${{ matrix.component }}
+      component-working-directory: source/terraform/components/${{ matrix.component }}
 
     steps:
       - name: Checkout

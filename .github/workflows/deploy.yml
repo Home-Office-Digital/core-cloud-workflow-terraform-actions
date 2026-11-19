@@ -58,12 +58,13 @@ on:
         default: "eu-west-2"
       terraform-version:
         description: >-
-          Terraform version to use. S3-native state locking needs 1.10+. A
-          component using newer syntax must override it (the POC caller passes
-          '>= 1.15.0').
+          Exact Terraform version, such as 1.17.2. S3-native state locking needs
+          1.10+. Avoid a range: plan and apply resolve it separately, and if a
+          release lands while apply waits at the gate, Terraform refuses the
+          saved plan and the run must be re-run.
         required: false
         type: string
-        default: ">= 1.10.0"
+        default: "1.17.2"
       deployments-file:
         description: >-
           Path to the committed deployments.json (relative to the repo root), the

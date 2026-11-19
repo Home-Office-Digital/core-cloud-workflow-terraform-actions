@@ -72,7 +72,7 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 | `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`, exported as `TF_AWS_TAG_POLICY_COMPLIANCE`. |
 | `DYNATRACE_ENVIRONMENT_ID`, `DYNATRACE_PLATFORM_TOKEN` | all | none | Dynatrace provider credentials. |
 | `runner` | all | `ubuntu-latest` | Runner for the jobs that run Terraform against real providers. |
-| `terraform-version` | all | `>= 1.10.0` | Terraform version constraint. |
+| `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Terraform version. Pass an exact version to deploy: plan and apply resolve a range separately, so a release landing while apply waits at the gate makes Terraform refuse the saved plan. |
 | `aws-region` | all | `eu-west-2` | Region for the state backend. |
 | `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. |
 
@@ -153,7 +153,7 @@ jobs:
       version: ${{ inputs.version != '' && inputs.version || github.ref_name }}
       ephemeral: ${{ inputs.ephemeral || false }}
       plan-only: ${{ inputs.plan-only || false }}
-      terraform-version: ">= 1.15.0"
+      terraform-version: "1.17.2"
 ```
 
 The PR validation and cleanup callers have the same shape and call `pr-validation.yml` and `cleanup-ephemeral.yml`. PR validation triggers on `pull_request` for `source/terraform/**` and passes `environment: dev`. Cleanup runs weekly on a schedule and on dispatch with a `scope` input (`all` for closed or merged PRs, or `pr-<n>` for one PR in any state). It passes `scope: ${{ inputs.scope || 'all' }}` and `environment: dev`, which must equal `development-environment`. Cleanup is ungated and only ever touches `pr-*` workspaces in that environment.

@@ -93,12 +93,13 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same PR cancels the run it supersedes, so two runs of one
-# caller don't plan the same state at once. github.workflow is the caller's
-# name, so two callers on one PR keep separate groups.
+# One run at a time per caller and PR, so two pushes don't plan the same state at
+# once. Queued, not cancelled: a newer run waits for the active one (a run still
+# waiting is replaced), so a plan is never killed mid-run with the state lock held.
+# github.workflow is the caller's name, so two callers on one PR keep separate groups.
 concurrency:
   group: tf-pr-validation_${{ github.workflow }}_${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # Once-per-run checks, then enumerate every {component, deployment} pair into

@@ -47,11 +47,6 @@ on:
         required: false
         type: string
         default: "source/terraform/deployments.json"
-      pre-exec-script:
-        description: "Optional shell script run before terraform init, in every job that runs init. Same as standard-pipeline's pre-exec-script: GITHUB_TOKEN is set to the App token, git_auth_token, or the job token, in that order."
-        required: false
-        type: string
-        default: ""
       tf-aws-tag-policy-compliance:
         description: "Optional AWS provider tag-policy compliance level: 'warning' or 'error'. Exported as TF_AWS_TAG_POLICY_COMPLIANCE on every leg that runs plan or apply. Same as standard-pipeline."
         required: false
@@ -64,13 +59,13 @@ on:
         type: string
     secrets:
       github_app_client_id:
-        description: "GitHub App client ID for private module sources, as in standard-pipeline."
+        description: "GitHub App client ID for private module sources. Set with github_app_private_key; the workflow mints a token and configures git for github.com."
         required: false
       github_app_private_key:
-        description: "GitHub App private key for private module sources, as in standard-pipeline."
+        description: "GitHub App private key for private module sources. Set with github_app_client_id."
         required: false
       git_auth_token:
-        description: "Token for private module sources, as in standard-pipeline."
+        description: "Token for private module sources, used when no GitHub App is set. The workflow configures git for github.com with it."
         required: false
       sonar_host_url:
         description: "Ignored. SonarQube runs in the repository's own scan workflow; kept so existing callers don't fail."
@@ -170,7 +165,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
   # One leg per component/module that has tests. terraform test needs an
-  # initialised directory, so this job runs Pre-exec (private modules) and an
+  # initialised directory, so this job runs Git auth (private modules) and an
   # init without a backend: tests don't touch real state or AWS.
   test:
     name: "Test ${{ matrix.target.name }}"
@@ -188,13 +183,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Pre-exec
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/pre-exec@feature/add-new-terraform-workflows
+      - name: Git auth
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feature/add-new-terraform-workflows
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
-          script: ${{ inputs.pre-exec-script }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -253,13 +247,12 @@ jobs:
           environment: ${{ inputs.environment }}
           deployment: ${{ matrix.deployment }}
 
-      - name: Pre-exec
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/pre-exec@feature/add-new-terraform-workflows
+      - name: Git auth
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feature/add-new-terraform-workflows
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
-          script: ${{ inputs.pre-exec-script }}
 
       - name: Terraform Init
         id: init

@@ -67,20 +67,13 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 | Name | Used by | Default | Purpose |
 | --- | --- | --- | --- |
 | `development-environment`, `pre-release-environment`, `release-environment` | deploy (`development-environment` also cleanup) | `dev`, `test`, `prod` | The environment each trigger deploys to. `development-environment` also hosts ephemeral workspaces and skips the version check. An empty value disables that trigger. |
-| `pre-exec-script` | all | none | Shell script run before `terraform init`, in every job that runs init. `GITHUB_TOKEN` is set. |
-| `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. The App token is used first, then `git_auth_token`; either becomes `GITHUB_TOKEN` in the script. |
+| `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. With both App secrets set, the workflow mints an App token; otherwise it uses `git_auth_token`. It then points git at the token for `github.com` (HTTPS and SSH URLs) for the rest of the job. Setting only one App secret fails the run. There is no `pre-exec-script`: a `standard-pipeline` caller passes the same secrets and drops its `insteadOf` script. |
 | `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`, exported as `TF_AWS_TAG_POLICY_COMPLIANCE`. |
 | `DYNATRACE_ENVIRONMENT_ID`, `DYNATRACE_PLATFORM_TOKEN` | all | none | Dynatrace provider credentials. |
 | `runner` | all | `ubuntu-latest` | Runner for the jobs that run Terraform against real providers. |
 | `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Terraform version. Pass an exact version to deploy: plan and apply resolve a range separately, so a release landing while apply waits at the gate makes Terraform refuse the saved plan. |
 | `aws-region` | all | `eu-west-2` | Region for the state backend. |
 | `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. |
-
-For private modules, the pre-exec script can rewrite module URLs to use the token:
-
-```yaml
-pre-exec-script: git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-```
 
 SonarQube runs in the repository's own scan workflow. `pr-validation.yml` still accepts `sonar_host_url` and `sonar_token` so existing callers keep working, and ignores them.
 

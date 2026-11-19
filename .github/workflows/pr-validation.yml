@@ -8,6 +8,8 @@ name: Terraform PR Validation
 #   once per run:      fmt and TFLint (`lint`), in parallel with `test` and `validate`
 #   per component/module: terraform test (`test` matrix)
 #   per leg:           init -> validate -> plan (`validate` matrix)
+# With `plan: false` (module-only repos) only `lint` and `test` run: no
+# deployments.json, no legs, no AWS access, no state.
 #
 # Validates EVERY component on every PR rather than detecting which a PR touches:
 # `expand` enumerates the components root and the `validate` matrix runs one
@@ -17,6 +19,14 @@ name: Terraform PR Validation
 on:
   workflow_call:
     inputs:
+      plan:
+        description: >-
+          Plan each deployment against real state. Set false for a module-only
+          repository: only fmt, TFLint and terraform test run, with no
+          deployments.json, AWS access or state.
+        required: false
+        default: true
+        type: boolean
       aws-region:
         description: "AWS Region for the State Bucket and Resources"
         default: eu-west-2
@@ -78,10 +88,10 @@ on:
       DYNATRACE_PLATFORM_TOKEN:
         required: false
 
+# Read-only by default; only the validate legs request OIDC, so a plan: false
+# caller needs to grant just contents: read.
 permissions:
   contents: read
-  pull-requests: read
-  id-token: write
 
 jobs:
   # Once-per-run checks, then enumerate every {component, deployment} pair into
@@ -113,12 +123,14 @@ jobs:
       # Whole-file check on every PR: broken or inconsistent deployments.json
       # can't merge. Validates all entries, every environment, not just this run's.
       - name: Validate deployments.json
+        if: ${{ inputs.plan }}
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feature/add-new-terraform-workflows
         with:
           deployments-file: ${{ inputs.deployments-file }}
 
       - name: Expand deployments
         id: expand
+        if: ${{ inputs.plan }}
         # Pinned to the feature branch until the POC merges to main.
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@feature/add-new-terraform-workflows
         with:
@@ -178,7 +190,6 @@ jobs:
         target: ${{ fromJSON(needs.expand.outputs.test-targets) }}
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -210,7 +221,7 @@ jobs:
     needs: expand
     # Tests and plans run in parallel on a PR; this job does not wait for `test`.
     # The PR check still fails if any test job fails.
-    if: ${{ needs.expand.result == 'success' }}
+    if: ${{ needs.expand.result == 'success' && inputs.plan }}
     runs-on: ${{ inputs.runner }}
     # No `environment:`: PR validation is plan-only and must never hit an approval
     # gate. One leg per pair; fail-fast: false so one leg's failure still lets the

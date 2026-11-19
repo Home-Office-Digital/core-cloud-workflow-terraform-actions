@@ -71,6 +71,7 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 | `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`, exported as `TF_AWS_TAG_POLICY_COMPLIANCE`. |
 | `DYNATRACE_ENVIRONMENT_ID`, `DYNATRACE_PLATFORM_TOKEN` | all | none | Dynatrace provider credentials. |
 | `runner` | all | `ubuntu-latest` | Runner for the jobs that run Terraform against real providers. |
+| `plan` | pr-validation | `true` | Set `false` for a module-only repository: only `lint` and `test` run, with no `deployments.json`, AWS access or state, and the caller needs only `contents: read`. |
 | `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Terraform version. Pass an exact version to deploy: plan and apply resolve a range separately, so a release landing while apply waits at the gate makes Terraform refuse the saved plan. |
 | `aws-region` | all | `eu-west-2` | Region for the state backend. |
 | `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. |

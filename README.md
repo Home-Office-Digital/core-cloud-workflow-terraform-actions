@@ -10,10 +10,10 @@ Reusable GitHub Actions workflows that lint, test, plan and apply Terraform acro
 
 ```text
 deploy:         preflight -> lint | test | plan (parallel) -> approval gate -> apply
-pr-validation:  expand    -> lint | test | validate (parallel)
+pr-validation:  preflight -> lint | test | plan (parallel)
 ```
 
-`preflight` decides what runs: it resolves the trigger to an environment and version, checks preconditions, validates `deployments.json` and expands the selectors into a leg matrix. A skipped trigger stops the run there. `lint` runs `terraform fmt` and TFLint once over `source/terraform`. `test` runs `terraform test` once per component, and per module in PR validation, with `init -backend=false`, so it never touches state or AWS. `plan` and `apply` (`validate` in PR validation) run once per leg. Each plan uses the read-only plan role and uploads its plan file, and apply uses the apply role to apply that file. `apply` needs `lint`, `test` and `plan` to succeed; `test` may be skipped when no component has tests. `pr-validation.yml` has no apply job and no gate. `deploy.yml` with `plan-only: true` plans every leg and stops, with no gate, for change-control evidence against any environment.
+`preflight` decides what runs: it resolves the trigger to an environment and version, checks preconditions, validates `deployments.json` and expands the selectors into a leg matrix. A skipped trigger stops the run there. `lint` runs `terraform fmt` and TFLint once over `source/terraform`. `test` runs `terraform test` once per component, and per module in PR validation, with `init -backend=false`, so it never touches state or AWS. `plan` and `apply` run once per leg. Each plan uses the read-only plan role and uploads its plan file, and apply uses the apply role to apply that file. `apply` needs `lint`, `test` and `plan` to succeed; `test` may be skipped when no component has tests. `pr-validation.yml` has no apply job and no gate. `deploy.yml` with `plan-only: true` plans every leg and stops, with no gate, for change-control evidence against any environment.
 
 ## Triggers
 

@@ -97,7 +97,7 @@ on:
         type: string
         default: ""
       runner:
-        description: "Runner label for the jobs that run Terraform against real providers (plan, apply, PR validate legs, cleanup). Bookkeeping jobs stay on ubuntu-latest. Same as standard-pipeline's runner."
+        description: "Runner label for the jobs that run Terraform against real providers (plan, apply, PR plan legs, cleanup). Bookkeeping jobs stay on ubuntu-latest. Same as standard-pipeline's runner."
         required: false
         default: "ubuntu-latest"
         type: string

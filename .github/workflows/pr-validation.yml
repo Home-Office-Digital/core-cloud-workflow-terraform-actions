@@ -3,17 +3,17 @@ name: Terraform PR Validation
 # Reusable PR validation workflow: the Terraform quality chain, plan-only with
 # the read-only Plan_Role, so a PR can never change resources. No apply step, no
 # apply role.
-#   once per run:      deployments.json validation, expansion, and discovery of
-#                      the components/modules that have tests (`expand`)
-#   once per run:      fmt and TFLint (`lint`), in parallel with `test` and `validate`
+#   once per run:      deployments.json validation, expansion, discovery of the
+#                      components/modules that have tests, summary (`preflight`)
+#   once per run:      fmt and TFLint (`lint`), in parallel with `test` and `plan`
 #   per component/module: terraform test (`test` matrix)
-#   per leg:           init -> validate -> plan (`validate` matrix)
+#   per leg:           init -> validate -> plan (`plan` matrix)
 # With `plan: false` (module-only repos) only `lint` and `test` run: no
 # deployments.json, no legs, no AWS access, no state.
 #
-# Validates EVERY component on every PR rather than detecting which a PR touches:
-# `expand` enumerates the components root and the `validate` matrix runs one
-# leg per component. This surfaces knock-on effects of a shared-module change
+# Plans EVERY component on every PR rather than detecting which a PR touches:
+# `preflight` enumerates the components root and the `plan` matrix runs one leg
+# per deployment. This surfaces knock-on effects of a shared-module change
 # without computing a dependency graph.
 
 on:
@@ -42,9 +42,8 @@ on:
         type: string
       terraform-version:
         description: >-
-          Terraform version to use. S3-native state locking needs 1.10+. A
-          component using newer syntax must override it (the POC caller passes
-          '>= 1.15.0').
+          Terraform version to use. S3-native state locking needs 1.10+. Pass
+          the same exact version as the deploy caller.
         required: false
         default: ">= 1.10.0"
         type: string
@@ -63,7 +62,7 @@ on:
         type: string
         default: ""
       runner:
-        description: "Runner label for the jobs that run Terraform against real providers (plan, apply, PR validate legs, cleanup). Bookkeeping jobs stay on ubuntu-latest. Same as standard-pipeline's runner."
+        description: "Runner label for the jobs that run Terraform against real providers (plan, apply, PR plan legs, cleanup). Bookkeeping jobs stay on ubuntu-latest. Same as standard-pipeline's runner."
         required: false
         default: "ubuntu-latest"
         type: string
@@ -88,19 +87,26 @@ on:
       DYNATRACE_PLATFORM_TOKEN:
         required: false
 
-# Read-only by default; only the validate legs request OIDC. GitHub checks every
+# Read-only by default; only the plan legs request OIDC. GitHub checks every
 # job's permissions against the caller's grant before `if:` is evaluated, so
 # every caller, including plan: false, must grant id-token: write.
 permissions:
   contents: read
 
+# A newer push to the same PR cancels the run it supersedes, so two runs of one
+# caller don't plan the same state at once. github.workflow is the caller's
+# name, so two callers on one PR keep separate groups.
+concurrency:
+  group: tf-pr-validation_${{ github.workflow }}_${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Once-per-run checks, then enumerate every {component, deployment} pair into
-  # the matrix the validate job fans out over and every directory with tests into
+  # the matrix the plan job fans out over and every directory with tests into
   # the matrix the test job fans out over. Both selectors are 'all' because
   # validation covers everything.
-  expand:
-    name: "Expand deployments"
+  preflight:
+    name: "preflight"
     runs-on: ubuntu-latest
     outputs:
       include: ${{ steps.expand.outputs.include }}
@@ -148,12 +154,42 @@ jobs:
         with:
           include-modules: "true"
 
+      # Runs even when an earlier step failed, so a stopped run still explains itself.
+      - name: Write summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PLAN: ${{ inputs.plan }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          INCLUDE: ${{ steps.expand.outputs.include }}
+          SKIPPED: ${{ steps.expand.outputs.skipped }}
+          TARGETS: ${{ steps.test-targets.outputs.targets }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          # Values come from env and jq, never interpolated into the script.
+          names() { jq -r 'if type == "array" and length > 0 then map("`" + (if type == "object" then "\(.component)/\(.deployment)" else tostring end) + "`") | join(", ") else "none" end' <<< "${1:-[]}" 2>/dev/null || echo "none"; }
+          tests="$(jq -r 'if type == "array" and length > 0 then map("`" + .name + "`") | join(", ") else "none" end' <<< "${TARGETS:-[]}" 2>/dev/null || echo "none")"
+          {
+            echo "### PR validation"
+            if [[ "${JOB_STATUS}" != "success" ]]; then
+              echo "Stopped in preflight; see the failed step."
+            fi
+            if [[ "${PLAN}" == "true" ]]; then
+              echo "- **Plans against:** \`${ENVIRONMENT}\`"
+              echo "- **Legs:** $(names "${INCLUDE}")"
+              echo "- **Components without \`${ENVIRONMENT}\`:** $(names "${SKIPPED}")"
+            else
+              echo "- **Plans:** off (\`plan: false\`)"
+            fi
+            echo "- **Tests:** ${tests}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   # Code-quality checks (fmt, TFLint), once per run, in parallel with tests and
   # plans. The PR check fails if this job fails.
   lint:
     name: "Lint"
-    needs: expand
-    if: ${{ needs.expand.result == 'success' }}
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -182,13 +218,13 @@ jobs:
   # init without a backend: tests don't touch real state or AWS.
   test:
     name: "Test ${{ matrix.target.name }}"
-    needs: expand
-    if: ${{ needs.expand.result == 'success' && needs.expand.outputs.test-targets != '[]' }}
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && needs.preflight.outputs.test-targets != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.expand.outputs.test-targets) }}
+        target: ${{ fromJSON(needs.preflight.outputs.test-targets) }}
     permissions:
       contents: read
     steps:
@@ -217,12 +253,12 @@ jobs:
         with:
           working-directory: ${{ matrix.target.dir }}
 
-  validate:
-    name: "Validate ${{ matrix.component }}/${{ matrix.deployment }}"
-    needs: expand
+  plan:
+    name: "Plan ${{ matrix.component }}/${{ matrix.deployment }} (${{ inputs.environment }})"
+    needs: preflight
     # Tests and plans run in parallel on a PR; this job does not wait for `test`.
     # The PR check still fails if any test job fails.
-    if: ${{ needs.expand.result == 'success' && inputs.plan }}
+    if: ${{ needs.preflight.result == 'success' && inputs.plan }}
     runs-on: ${{ inputs.runner }}
     # No `environment:`: PR validation is plan-only and must never hit an approval
     # gate. One leg per pair; fail-fast: false so one leg's failure still lets the
@@ -230,7 +266,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.expand.outputs.include) }}
+        include: ${{ fromJSON(needs.preflight.outputs.include) }}
 
     permissions:
       contents: read

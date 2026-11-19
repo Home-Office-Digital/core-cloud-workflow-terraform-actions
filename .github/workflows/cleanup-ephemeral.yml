@@ -1,10 +1,10 @@
 name: Terraform Ephemeral Cleanup
 
-# Tears down ephemeral pr-<n>-<deployment> workspaces.
-#   scope=all     closed/merged PRs only
-#   scope=pr-<n>  one PR, any state
-# Ungated: discover only lists pr-* workspaces and the guard confines it to the
-# development-environment, so it reaches no shared or prod state. A scheduled scope=all caller runs unattended.
+# Destroys ephemeral pr-<n>-<deployment> workspaces.
+#   scope=all     workspaces of closed or merged PRs
+#   scope=pr-<n>  one PR's workspaces, in any state
+# Ungated: it only touches pr-* workspaces in the development environment, so a
+# scheduled run can go unattended.
 on:
   workflow_call:
     inputs:
@@ -33,14 +33,13 @@ on:
         default: ">= 1.10.0"
       deployments-file:
         description: >-
-          Path to the committed deployments.json (relative to the repo root), keyed
-          by "<component>/<env>/<deployment>". Cleanup reads account_id,
-          apply_role_name, and the state backend per leg.
+          Path to deployments.json, keyed "<component>/<env>/<deployment>".
+          Only account_id, apply_role_name and state_bucket_name are used.
         required: false
         type: string
         default: "source/terraform/deployments.json"
       runner:
-        description: "Runner label for the jobs that run Terraform against real providers (plan, apply, PR plan legs, cleanup). Bookkeeping jobs stay on ubuntu-latest. Same as standard-pipeline's runner."
+        description: "Runner label for the discover and destroy jobs. Same as standard-pipeline."
         required: false
         default: "ubuntu-latest"
         type: string
@@ -67,8 +66,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  # Guards the environment before any AWS access, then lists the pr-* workspaces
-  # to destroy.
+  # Checks the environment before any AWS access, then lists what to destroy.
   discover:
     name: "Discover (${{ inputs.scope }})"
     runs-on: ${{ inputs.runner }}
@@ -102,8 +100,7 @@ jobs:
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
 
-      # No Configure AWS credentials step: deployments may span accounts, so the
-      # action authenticates per leg into each leg's own account (see its header).
+      # Authenticates per leg, because legs can be in different accounts.
       - name: Discover orphan workspaces
         id: discover
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/discover-orphan-workspaces@feature/add-new-terraform-workflows
@@ -113,8 +110,7 @@ jobs:
           deployments-file: ${{ inputs.deployments-file }}
           aws-region: ${{ inputs.aws-region }}
 
-  # Loops destroy + delete over the workspaces discover listed, re-assuming each
-  # leg's account. Skips when none are in scope.
+  # Destroys and deletes each listed workspace. Skipped when there are none.
   destroy:
     name: "Destroy (${{ inputs.scope }})"
     needs: discover
@@ -124,7 +120,7 @@ jobs:
       group: cleanup-ephemeral-${{ inputs.environment }}
       cancel-in-progress: false
     env:
-      # Dynatrace provider credentials, as in standard-pipeline; empty when not passed.
+      # Dynatrace provider credentials; empty when not passed.
       DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
       DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
     steps:

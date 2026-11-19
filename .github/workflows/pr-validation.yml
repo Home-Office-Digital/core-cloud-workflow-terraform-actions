@@ -1,20 +1,13 @@
 name: Terraform PR Validation
 
-# Reusable PR validation workflow: the Terraform quality chain, plan-only with
-# the read-only Plan_Role, so a PR can never change resources. No apply step, no
-# apply role.
-#   once per run:      deployments.json validation, expansion, discovery of the
-#                      components/modules that have tests, summary (`preflight`)
-#   once per run:      fmt and TFLint (`lint`), in parallel with `test` and `plan`
-#   per component/module: terraform test (`test` matrix)
-#   per leg:           init -> validate -> plan (`plan` matrix)
-# With `plan: false` (module-only repos) only `lint` and `test` run: no
-# deployments.json, no legs, no AWS access, no state.
-#
-# Plans EVERY component on every PR rather than detecting which a PR touches:
-# `preflight` enumerates the components root and the `plan` matrix runs one leg
-# per deployment. This surfaces knock-on effects of a shared-module change
-# without computing a dependency graph.
+# Reusable PR validation workflow. Plans with the read-only plan role and never
+# applies.
+#   preflight      once: validate deployments.json, expand legs, find tests
+#   lint           once: fmt and TFLint
+#   test           per component and module with tests
+#   plan           per leg: init, validate, plan
+# Every component is planned on every PR, so a shared-module change shows its
+# effect on each consumer. With `plan: false` no plans run.
 
 on:
   workflow_call:
@@ -28,15 +21,13 @@ on:
         default: true
         type: boolean
       aws-region:
-        description: "AWS Region for the State Bucket and Resources"
+        description: "AWS region of the state bucket."
         default: eu-west-2
         required: false
         type: string
       environment:
         description: >-
-          Which environment's state each PR plan runs against (dev, test, or
-          prod). Validation is plan-only with no gate; this only picks the state
-          and backend to plan against, it does not deploy.
+          Environment whose state each plan runs against. Nothing is deployed.
         required: false
         default: "dev"
         type: string
@@ -49,20 +40,18 @@ on:
         type: string
       deployments-file:
         description: >-
-          Path to the committed deployments.json (relative to the repo root), keyed
-          by "<component>/<env>/<deployment>". PR validation is plan-only, so it
-          uses account_id, plan_role_name, and the state backend per leg;
-          apply_role_name is unused.
+          Path to deployments.json, keyed "<component>/<env>/<deployment>".
+          Only account_id, plan_role_name and state_bucket_name are used.
         required: false
         type: string
         default: "source/terraform/deployments.json"
       tf-aws-tag-policy-compliance:
-        description: "Optional AWS provider tag-policy compliance level: 'warning' or 'error'. Exported as TF_AWS_TAG_POLICY_COMPLIANCE on every leg that runs plan or apply. Same as standard-pipeline."
+        description: "AWS provider tag-policy compliance: 'warning', 'error' or empty. Exported as TF_AWS_TAG_POLICY_COMPLIANCE. Same as standard-pipeline."
         required: false
         type: string
         default: ""
       runner:
-        description: "Runner label for the jobs that run Terraform against real providers (plan, apply, PR plan legs, cleanup). Bookkeeping jobs stay on ubuntu-latest. Same as standard-pipeline's runner."
+        description: "Runner label for the plan jobs. The rest run on ubuntu-latest. Same as standard-pipeline."
         required: false
         default: "ubuntu-latest"
         type: string
@@ -95,17 +84,14 @@ permissions:
 
 # One run at a time per caller and PR, so two pushes don't plan the same state at
 # once. Queued, not cancelled: a newer run waits for the active one (a run still
-# waiting is replaced), so a plan is never killed mid-run with the state lock held.
+# waiting is replaced), so a newer push never stops a plan holding the lock.
 # github.workflow is the caller's name, so two callers on one PR keep separate groups.
 concurrency:
   group: tf-pr-validation_${{ github.workflow }}_${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
-  # Once-per-run checks, then enumerate every {component, deployment} pair into
-  # the matrix the plan job fans out over and every directory with tests into
-  # the matrix the test job fans out over. Both selectors are 'all' because
-  # validation covers everything.
+  # Builds the plan and test matrices and writes the summary. Selectors are always 'all'.
   preflight:
     name: "preflight"
     runs-on: ubuntu-latest
@@ -113,7 +99,7 @@ jobs:
       include: ${{ steps.expand.outputs.include }}
       test-targets: ${{ steps.test-targets.outputs.targets }}
     steps:
-      # Fail fast on a typo; the provider would otherwise reject it per leg.
+      # Catch a typo once, before any leg runs.
       - name: Validate tag-policy setting
         env:
           TAG_POLICY: ${{ inputs.tf-aws-tag-policy-compliance }}
@@ -128,8 +114,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Whole-file check on every PR: broken or inconsistent deployments.json
-      # can't merge. Validates all entries, every environment, not just this run's.
+      # The whole file, every environment, so a broken config fails the PR.
       - name: Validate deployments.json
         if: ${{ inputs.plan }}
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feature/add-new-terraform-workflows
@@ -139,16 +124,14 @@ jobs:
       - name: Expand deployments
         id: expand
         if: ${{ inputs.plan }}
-        # Pinned to the feature branch until the POC merges to main.
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@feature/add-new-terraform-workflows
         with:
           component: all
           deployment: all
           environment: ${{ inputs.environment }}
-          # Matches deploy.yml's behaviour for 'all' runs: components without this environment are skipped with a notice.
+          # As in deploy: components without this environment are skipped with a notice.
           missing-environment: skip
 
-      # Every component and module that has Terraform tests.
       - name: Find test targets
         id: test-targets
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@feature/add-new-terraform-workflows
@@ -163,7 +146,6 @@ jobs:
           PLAN: ${{ inputs.plan }}
           ENVIRONMENT: ${{ inputs.environment }}
           INCLUDE: ${{ steps.expand.outputs.include }}
-          SKIPPED: ${{ steps.expand.outputs.skipped }}
           TARGETS: ${{ steps.test-targets.outputs.targets }}
           JOB_STATUS: ${{ job.status }}
         run: |
@@ -178,15 +160,13 @@ jobs:
             if [[ "${PLAN}" == "true" ]]; then
               echo "- **Plans against:** \`${ENVIRONMENT}\`"
               echo "- **Legs:** $(names "${INCLUDE}")"
-              echo "- **Components without \`${ENVIRONMENT}\`:** $(names "${SKIPPED}")"
             else
               echo "- **Plans:** off (\`plan: false\`)"
             fi
             echo "- **Tests:** ${tests}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # Code-quality checks (fmt, TFLint), once per run, in parallel with tests and
-  # plans. The PR check fails if this job fails.
+  # fmt and TFLint over source/terraform, once per run.
   lint:
     name: "Lint"
     needs: preflight
@@ -198,7 +178,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Formats every component and module once, recursively.
       - name: Terraform Fmt
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@feature/add-new-terraform-workflows
         with:
@@ -206,7 +185,6 @@ jobs:
           recursive: true
           terraform-version: ${{ inputs.terraform-version }}
 
-      # Lints every component and module once.
       - name: TFLint
         uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@268b840d0e48fa86be281a5727909655311f7af4 # 0.3.2
         with:
@@ -214,9 +192,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-  # One leg per component/module that has tests. terraform test needs an
-  # initialised directory, so this job runs Git auth (private modules) and an
-  # init without a backend: tests don't touch real state or AWS.
+  # One job per component and module with tests. Init has no backend, so tests
+  # never touch state or AWS; use mock providers.
   test:
     name: "Test ${{ matrix.target.name }}"
     needs: preflight
@@ -257,13 +234,11 @@ jobs:
   plan:
     name: "Plan ${{ matrix.component }}/${{ matrix.deployment }} (${{ inputs.environment }})"
     needs: preflight
-    # Tests and plans run in parallel on a PR; this job does not wait for `test`.
-    # The PR check still fails if any test job fails.
+    # Runs alongside lint and test.
     if: ${{ needs.preflight.result == 'success' && inputs.plan }}
     runs-on: ${{ inputs.runner }}
-    # No `environment:`: PR validation is plan-only and must never hit an approval
-    # gate. One leg per pair; fail-fast: false so one leg's failure still lets the
-    # others report their plan.
+    # No `environment:`, so plans never wait for approval. fail-fast is off so
+    # every leg reports its plan.
     strategy:
       fail-fast: false
       matrix:
@@ -274,7 +249,7 @@ jobs:
       id-token: write
 
     env:
-      # Dynatrace provider credentials, as in standard-pipeline; empty when not passed.
+      # Dynatrace provider credentials; empty when not passed.
       DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
       DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
       TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
@@ -284,8 +259,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Resolve this leg's config from deployments.json by its full key. Plan-only,
-      # so only account_id, plan_role_name, and the state backend are used.
       - name: Resolve leg config
         id: account
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feature/add-new-terraform-workflows
@@ -314,8 +287,7 @@ jobs:
           # S3-native locking; no DynamoDB table.
           state-encrypt: "true"
           state-use-lockfile: "true"
-          # Same repo-prefixed key as the deploy workflow (from resolve-account),
-          # so the PR plan reads the state the deploy writes and shows real drift.
+          # The deploy's state key, so the plan shows real drift.
           state-key: ${{ steps.account.outputs.state-key }}
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.component-working-directory }}
@@ -327,8 +299,6 @@ jobs:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.component-working-directory }}
 
-      # Plan only, Plan_Role only. No apply step and no apply role, so validation
-      # can never change resources.
       - name: Terraform Plan
         id: plan
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@feature/add-new-terraform-workflows
@@ -338,9 +308,7 @@ jobs:
           github-environment: ${{ inputs.environment }}
           role-to-assume: ${{ steps.account.outputs.plan-role-name }}
           terraform-version: ${{ inputs.terraform-version }}
-          # Per-leg tfvars, as in the deploy workflow.
           tfvars-file: environments/${{ inputs.environment }}/${{ matrix.deployment }}.tfvars
           working-directory: ${{ env.component-working-directory }}
-          # Per-leg name so parallel legs don't all upload terraform-plan-file-<env>;
-          # matches the deploy workflow's scheme. '_' joins the parts because names can contain hyphens.
+          # Per-leg name, as in deploy, so parallel legs don't collide.
           artifact-name: terraform-plan_${{ matrix.component }}_${{ matrix.deployment }}_${{ inputs.environment }}

@@ -88,8 +88,9 @@ on:
       DYNATRACE_PLATFORM_TOKEN:
         required: false
 
-# Read-only by default; only the validate legs request OIDC, so a plan: false
-# caller needs to grant just contents: read.
+# Read-only by default; only the validate legs request OIDC. GitHub checks every
+# job's permissions against the caller's grant before `if:` is evaluated, so
+# every caller, including plan: false, must grant id-token: write.
 permissions:
   contents: read
 
@@ -233,7 +234,6 @@ jobs:
 
     permissions:
       contents: read
-      pull-requests: read
       id-token: write
 
     env:

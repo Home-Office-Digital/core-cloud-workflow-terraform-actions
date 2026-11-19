@@ -1,10 +1,8 @@
 name: "Resolve trigger"
 description: "Map the triggering event (workflow_dispatch, push or release) to a deploy mode, environment, version and ephemeral flag, or to a skip."
 
-# The decision logic lives in resolve-trigger.sh. Every input reaches the script
-# through env:, never through interpolation into the script text. Composite
-# inputs have their own defaults, so a caller that wants an empty *-environment
-# (to disable that event) must pass all three explicitly.
+# Composite inputs have their own defaults, so pass all three *-environment
+# inputs explicitly; an empty value disables that event.
 
 inputs:
   event-name:

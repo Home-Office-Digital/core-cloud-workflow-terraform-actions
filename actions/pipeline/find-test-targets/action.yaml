@@ -4,10 +4,6 @@ description: "List the component and module directories that contain Terraform t
 # directly or in its tests/ subdirectory (the two places `terraform test` looks by
 # default). Components are the immediate subdirectories of components-dir; modules
 # are the immediate subdirectories of modules-dir.
-#
-# Example output:
-#   [{"name":"component-a","dir":"source/terraform/components/component-a"},
-#    {"name":"modules/example","dir":"source/terraform/modules/example"}]
 inputs:
   components-dir:
     description: "Directory whose immediate subdirectories are the components (relative to the repo root)."
@@ -31,7 +27,7 @@ inputs:
     default: "true"
 outputs:
   targets:
-    description: "JSON array of {name, dir} objects, sorted by name; [] when nothing has tests."
+    description: "JSON array of {name, dir} objects sorted by name, e.g. [{\"name\":\"modules/example\",\"dir\":\"source/terraform/modules/example\"}]; [] when nothing has tests."
     value: ${{ steps.find.outputs.targets }}
 runs:
   using: "composite"
@@ -44,48 +40,4 @@ runs:
         MODULES_DIR: ${{ inputs.modules-dir }}
         COMPONENTS_FILTER: ${{ inputs.components }}
         INCLUDE_MODULES: ${{ inputs.include-modules }}
-      run: |
-        set -euo pipefail
-        shopt -s nullglob
-
-        has_tests() {
-          local files=("$1"/*.tftest.hcl "$1"/tests/*.tftest.hcl)
-          [ "${#files[@]}" -gt 0 ]
-        }
-
-        targets='[]'
-        add_target() {
-          targets=$(jq -c --arg name "$1" --arg dir "$2" '. + [{name: $name, dir: $dir}]' <<<"$targets")
-        }
-
-        # Component names to keep; null means no restriction.
-        allowed='null'
-        if [ -n "${COMPONENTS_FILTER// /}" ]; then
-          allowed=$(jq -c 'map(if type == "object" then .component else . end) | unique' <<<"$COMPONENTS_FILTER")
-        fi
-
-        components_dir="${COMPONENTS_DIR%/}"
-        if [ -d "$components_dir" ]; then
-          for d in "$components_dir"/*/; do
-            name="$(basename "$d")"
-            if [ "$allowed" != "null" ] && ! jq -e --arg n "$name" 'index($n) != null' <<<"$allowed" >/dev/null; then
-              continue
-            fi
-            if has_tests "${d%/}"; then
-              add_target "$name" "${d%/}"
-            fi
-          done
-        fi
-
-        modules_dir="${MODULES_DIR%/}"
-        if [ "$INCLUDE_MODULES" = "true" ] && [ -d "$modules_dir" ]; then
-          for d in "$modules_dir"/*/; do
-            if has_tests "${d%/}"; then
-              add_target "modules/$(basename "$d")" "${d%/}"
-            fi
-          done
-        fi
-
-        targets=$(jq -c 'sort_by(.name)' <<<"$targets")
-        echo "Test targets: $targets"
-        echo "targets=$targets" >> "$GITHUB_OUTPUT"
+      run: ${{ github.action_path }}/find-test-targets.sh

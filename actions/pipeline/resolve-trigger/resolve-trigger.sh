@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Map the triggering event to a deploy mode, environment, version and ephemeral
-# flag, or to a skip. The path is chosen by EVENT_NAME alone.
+# Map the triggering event to a mode, environment, version and ephemeral flag,
+# or to a skip.
+# Env: EVENT_NAME, EVENT_PATH (default GITHUB_EVENT_PATH), INPUT_ENVIRONMENT,
+#      INPUT_VERSION, INPUT_EPHEMERAL, DEVELOPMENT_ENVIRONMENT,
+#      PRE_RELEASE_ENVIRONMENT, RELEASE_ENVIRONMENT.
+# Writes: mode, skip, environment, version, ephemeral (GITHUB_OUTPUT).
 #
-# Inputs (environment variables):
-#   EVENT_NAME, EVENT_PATH (empty => GITHUB_EVENT_PATH), INPUT_ENVIRONMENT,
-#   INPUT_VERSION, INPUT_EPHEMERAL, DEVELOPMENT_ENVIRONMENT, PRE_RELEASE_ENVIRONMENT,
-#   RELEASE_ENVIRONMENT
-# Outputs (appended to GITHUB_OUTPUT): mode, skip, environment, version, ephemeral
-#
-# Payload fields are untrusted. Only the fields listed below are read, values
-# are never evaluated, and any value containing a line break is rejected. For
-# non-skipped runs the environment must match ^[a-z0-9-]+$.
+# Event values are untrusted: never evaluated, and rejected if they contain a
+# line break.
 set -euo pipefail
 
 event_name="${EVENT_NAME:-}"
@@ -109,7 +106,6 @@ reject_newlines "environment" "${environment}"
 reject_newlines "version" "${version}"
 reject_newlines "ephemeral" "${ephemeral}"
 
-# The environment is used in folder names, state keys and the GitHub Environment name.
 if [[ "${skip}" == "false" && ! "${environment}" =~ ^[a-z0-9-]+$ ]]; then
   fail "invalid environment name '${environment}': use lowercase letters, digits and hyphens (it is used in folder names, state keys and the GitHub Environment name)."
 fi

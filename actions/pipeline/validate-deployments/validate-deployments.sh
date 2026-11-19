@@ -1,37 +1,29 @@
 #!/usr/bin/env bash
-# Validate deployments.json as a whole: valid JSON, every entry has the required
-# fields, and every entry maps 1:1 to a real tfvars file. Run on PRs and before a
-# deploy fans out, so a broken or inconsistent file is caught before any plan.
-#
-# State locking is S3-native (use_lockfile), so state_lock_table_name is no longer
-# required; entries that still carry it get a notice and are otherwise unaffected.
-#
-# To change what an entry must contain, edit REQUIRED_FIELDS below — nothing else.
-#
+# Validate deployments.json as a whole: valid JSON, every entry complete, and
+# entries matched 1:1 to tfvars files. An old state_lock_table_name gets a notice.
 # Usage: validate-deployments.sh <deployments-file> <components-dir>
 set -euo pipefail
 
-# ── The contract: the fields every deployment entry must have, non-empty. ──
+# Fields every entry must have, non-empty.
 REQUIRED_FIELDS=(
   account_id
   plan_role_name
   apply_role_name
   state_bucket_name
 )
-# ───────────────────────────────────────────────────────────────────────────
 
 DEPLOYMENTS_FILE="${1:?deployments-file required}"
 COMPONENTS_DIR="${2:?components-dir required}"
 
 problems=()
 
-# 1. Valid JSON, and a JSON object.
+# 1. The file is a JSON object.
 if ! jq -e 'type == "object"' "${DEPLOYMENTS_FILE}" >/dev/null 2>&1; then
   echo "::error::${DEPLOYMENTS_FILE} is not valid JSON, or not a JSON object."
   exit 1
 fi
 
-# 2. Every entry must be an object with all required fields present and non-empty.
+# 2. Every entry is an object with every required field set.
 required_json="$(jq -n '$ARGS.positional' --args "${REQUIRED_FIELDS[@]}")"
 field_problems="$(
   jq -r --argjson required "${required_json}" '
@@ -47,12 +39,9 @@ while IFS= read -r line; do
   [[ -n "${line}" ]] && problems+=("${line}")
 done <<< "${field_problems}"
 
-# 3. The entries and the tfvars files must match 1:1. A key is
-#    <component>/<env>/<deployment>; its tfvars lives at
-#    <components-dir>/<component>/environments/<env>/<deployment>.tfvars.
-#    Deriving keys from the filesystem also catches a typo'd component/env/
-#    deployment in a key (it won't match any real file). Only files exactly at
-#    that depth count (as in expand-deployments), so other tfvars (e.g. tests/) are ignored.
+# 3. Entries and tfvars files match 1:1. Key <component>/<env>/<deployment>
+#    maps to <components-dir>/<component>/environments/<env>/<deployment>.tfvars.
+#    Only files at exactly that depth count, so tfvars elsewhere (tests/) are ignored.
 entry_keys="$(jq -r 'keys[]' "${DEPLOYMENTS_FILE}")"
 tfvars_keys="$(
   find "${COMPONENTS_DIR}" -mindepth 4 -maxdepth 4 -type f -path '*/environments/*/*.tfvars' 2>/dev/null \
@@ -74,10 +63,11 @@ done < <(
   '
 )
 
-# 4. Legacy key: no longer used (S3-native locking). Notice only, never a failure.
+# 4. state_lock_table_name is unused with S3 locking: notice only.
 while IFS= read -r k; do
   [[ -n "${k}" ]] && echo "::notice::${k}: state_lock_table_name is ignored because state locking uses S3 (use_lockfile); it can be removed."
 done < <(jq -r 'to_entries[] | select((.value | type) == "object" and (.value | has("state_lock_table_name"))) | .key' "${DEPLOYMENTS_FILE}")
+
 if [[ "${#problems[@]}" -gt 0 ]]; then
   echo "::error::deployments.json is invalid:"
   for p in "${problems[@]}"; do echo "::error::  ${p}"; done

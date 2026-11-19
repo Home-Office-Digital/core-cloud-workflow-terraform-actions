@@ -1,20 +1,18 @@
 name: "Resolve ephemeral"
-description: "Gate an ephemeral deploy (dev only, branch must have an open PR) and output that PR number."
+description: "Check an ephemeral deploy (development environment only, branch must have an open PR) and output the PR number."
 
-# Runs once at the preconditions stage, before the fan-out, only when a deploy is
-# ephemeral. It gates and resolves in one step because the open-PR check and the
-# PR number come from the same lookup. The caller builds the per-leg workspace
-# name (pr-<n>-<deployment>) from the number this outputs.
+# Checks and resolves in one step, because both come from the same PR lookup.
+# The caller names each workspace pr-<n>-<deployment>.
 
 inputs:
   branch:
-    description: "Branch being deployed. Its open PR is the ephemeral environment's lifecycle anchor."
+    description: "Branch being deployed. It must have an open PR in this repository."
     required: true
   environment:
     description: "Target environment for this deploy."
     required: true
   ephemeral-environment:
-    description: "The environment ephemeral is allowed in — the tenant's feedback tier, whatever it is named. Rejects any other."
+    description: "The only environment an ephemeral deploy may target."
     required: false
     default: "dev"
 
@@ -35,24 +33,4 @@ runs:
         BRANCH: ${{ inputs.branch }}
         ENVIRONMENT: ${{ inputs.environment }}
         EPHEMERAL_ENVIRONMENT: ${{ inputs.ephemeral-environment }}
-      run: |
-        set -euo pipefail
-
-        if [[ "${ENVIRONMENT}" != "${EPHEMERAL_ENVIRONMENT}" ]]; then
-          echo "::error::ephemeral is allowed only in '${EPHEMERAL_ENVIRONMENT}'; got '${ENVIRONMENT}'."
-          exit 1
-        fi
-
-        # The open PR is the lifecycle anchor: it bounds the environment's life and
-        # lets cleanup reap the workspace when the PR closes. No PR, no ephemeral.
-        # --head matches the branch name in any repo, so fork PRs are filtered out.
-        pr="$(gh pr list --repo "${REPO}" --head "${BRANCH}" --state open \
-          --json number,isCrossRepository \
-          --jq 'map(select(.isCrossRepository | not)) | .[0].number // ""')"
-        if [[ -z "${pr}" ]]; then
-          echo "::error::no open PR for branch '${BRANCH}'. Open one (a draft is fine) before an ephemeral deploy."
-          exit 1
-        fi
-
-        echo "resolved ephemeral PR ${pr} for branch '${BRANCH}'."
-        echo "pr-number=${pr}" >> "${GITHUB_OUTPUT}"
+      run: ${{ github.action_path }}/resolve-ephemeral.sh

@@ -30,12 +30,7 @@ runs:
       env:
         ENVIRONMENT: ${{ inputs.environment }}
         VERSION: ${{ inputs.version }}
-      run: |
-        pattern='^(main|master|v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)$'
-        if [[ ! "${VERSION}" =~ ${pattern} ]]; then
-          echo "::error::${ENVIRONMENT} deployment rejected: version must be main, master, or a semver tag (v1.2.3, 1.2.3, or with a pre-release suffix such as v1.2.3-rc.1); got '${VERSION}'."
-          exit 1
-        fi
+      run: ${{ github.action_path }}/check-version.sh
 
     - name: Verify environment approval gate
       shell: bash
@@ -43,20 +38,4 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         REPO: ${{ github.repository }}
         ENVIRONMENT: ${{ inputs.environment }}
-      run: |
-        set -euo pipefail
-        # URL-encode any slashes in the environment name for the API path.
-        enc="${ENVIRONMENT//\//%2F}"
-        if ! body="$(gh api "repos/${REPO}/environments/${enc}" 2>/tmp/gh_err)"; then
-          if grep -qi 'Not Found' /tmp/gh_err; then
-            echo "::error::environment '${ENVIRONMENT}' is not configured in ${REPO}. GitHub would auto-create it ungated, so the apply approval gate would not apply. Create it with a required-reviewers rule before deploying."
-            exit 1
-          fi
-          echo "::error::could not read environment '${ENVIRONMENT}': $(cat /tmp/gh_err)"
-          exit 1
-        fi
-        if [[ "$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${body}")" -eq 0 ]]; then
-          echo "::error::environment '${ENVIRONMENT}' has no required-reviewers protection rule, so the apply would run ungated. Add required reviewers to the environment before deploying."
-          exit 1
-        fi
-        echo "environment '${ENVIRONMENT}' has a required-reviewers gate."
+      run: ${{ github.action_path }}/check-gate.sh

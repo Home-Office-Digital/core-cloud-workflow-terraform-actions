@@ -48,7 +48,7 @@ on:
         type: string
         default: "source/terraform/deployments.json"
       pre-exec-script:
-        description: "Optional shell script run before terraform init in every job that runs init (each Plan/Apply/Validate leg and cleanup job). Same as standard-pipeline's pre-exec-script. GITHUB_TOKEN, COMPONENT, DEPLOYMENT and ENVIRONMENT are set."
+        description: "Optional shell script run before terraform init, in every job that runs init. Same as standard-pipeline's pre-exec-script: GITHUB_TOKEN is set to the App token, git_auth_token, or the job token, in that order."
         required: false
         type: string
         default: ""
@@ -195,8 +195,6 @@ jobs:
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
           script: ${{ inputs.pre-exec-script }}
-          component: ${{ matrix.target.name }}
-          environment: ${{ inputs.environment }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -262,9 +260,6 @@ jobs:
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
           script: ${{ inputs.pre-exec-script }}
-          component: ${{ matrix.component }}
-          deployment: ${{ matrix.deployment }}
-          environment: ${{ inputs.environment }}
 
       - name: Terraform Init
         id: init

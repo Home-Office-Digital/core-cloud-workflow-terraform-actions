@@ -40,7 +40,7 @@ on:
         type: string
         default: "source/terraform/deployments.json"
       pre-exec-script:
-        description: "Optional shell script run before terraform init in every job that runs init (each Plan/Apply/Validate leg and cleanup job). Same as standard-pipeline's pre-exec-script. GITHUB_TOKEN, COMPONENT, DEPLOYMENT and ENVIRONMENT are set."
+        description: "Optional shell script run before terraform init, in every job that runs init. Same as standard-pipeline's pre-exec-script: GITHUB_TOKEN is set to the App token, git_auth_token, or the job token, in that order."
         required: false
         type: string
         default: ""
@@ -107,7 +107,6 @@ jobs:
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
           script: ${{ inputs.pre-exec-script }}
-          environment: ${{ inputs.environment }}
 
       # No Configure AWS credentials step: deployments may span accounts, so the
       # action authenticates per leg into each leg's own account (see its header).
@@ -145,7 +144,6 @@ jobs:
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
           script: ${{ inputs.pre-exec-script }}
-          environment: ${{ inputs.environment }}
 
       - name: Destroy workspaces
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/destroy-workspaces@feature/add-new-terraform-workflows

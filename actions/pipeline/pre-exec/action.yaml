@@ -21,18 +21,6 @@ inputs:
     description: "Pre-exec script to run. Skipped when empty."
     required: false
     default: ""
-  component:
-    description: "Component name, exported to the script as COMPONENT."
-    required: false
-    default: ""
-  deployment:
-    description: "Deployment name, exported to the script as DEPLOYMENT."
-    required: false
-    default: ""
-  environment:
-    description: "Environment name, exported to the script as ENVIRONMENT."
-    required: false
-    default: ""
 runs:
   using: composite
   steps:
@@ -53,9 +41,6 @@ runs:
         CUSTOM_GITHUB_TOKEN: ${{ inputs.git-auth-token }}
         GITHUB_TOKEN: ${{ github.token }}
         PRE_EXEC_SCRIPT: ${{ inputs.script }}
-        COMPONENT: ${{ inputs.component }}
-        DEPLOYMENT: ${{ inputs.deployment }}
-        ENVIRONMENT: ${{ inputs.environment }}
       run: |
         if [ -n "$APP_TOKEN" ]; then
           GITHUB_TOKEN="$APP_TOKEN"
@@ -63,5 +48,5 @@ runs:
           GITHUB_TOKEN="$CUSTOM_GITHUB_TOKEN"
         fi
         echo "::add-mask::$GITHUB_TOKEN"
-        export GITHUB_TOKEN COMPONENT DEPLOYMENT ENVIRONMENT
+        export GITHUB_TOKEN
         eval "$PRE_EXEC_SCRIPT"

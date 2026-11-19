@@ -67,7 +67,7 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 | Name | Used by | Default | Purpose |
 | --- | --- | --- | --- |
 | `development-environment`, `pre-release-environment`, `release-environment` | deploy (`development-environment` also cleanup) | `dev`, `test`, `prod` | The environment each trigger deploys to. `development-environment` also hosts ephemeral workspaces and skips the version check. An empty value disables that trigger. |
-| `pre-exec-script` | all | none | Shell script run before `terraform init`. `GITHUB_TOKEN`, `COMPONENT`, `DEPLOYMENT` and `ENVIRONMENT` are set. |
+| `pre-exec-script` | all | none | Shell script run before `terraform init`, in every job that runs init. `GITHUB_TOKEN` is set. |
 | `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. The App token is used first, then `git_auth_token`; either becomes `GITHUB_TOKEN` in the script. |
 | `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`, exported as `TF_AWS_TAG_POLICY_COMPLIANCE`. |
 | `DYNATRACE_ENVIRONMENT_ID`, `DYNATRACE_PLATFORM_TOKEN` | all | none | Dynatrace provider credentials. |

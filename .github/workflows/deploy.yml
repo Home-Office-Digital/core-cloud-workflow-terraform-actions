@@ -75,18 +75,18 @@ on:
         required: false
         type: string
         default: "source/terraform/deployments.json"
-      dev-environment:
-        description: "Name of the Dev environment."
+      development-environment:
+        description: "Environment for unreleased code: a push to the default branch, and ephemeral PR deploys. Skips the version check. Empty disables the push trigger."
         required: false
         type: string
         default: dev
-      test-environment:
-        description: "Name of the Test environment."
+      pre-release-environment:
+        description: "Environment deployed on a published pre-release. Empty disables that trigger."
         required: false
         type: string
         default: test
-      prod-environment:
-        description: "Name of the Prod environment."
+      release-environment:
+        description: "Environment deployed on a released event (stable publish or promotion). Empty disables that trigger."
         required: false
         type: string
         default: prod
@@ -164,9 +164,9 @@ jobs:
           ephemeral: ${{ inputs.ephemeral }}
           # Always passed explicitly: an omitted composite input falls back to its
           # own default, which would defeat disabling an event with ''.
-          dev-environment: ${{ inputs.dev-environment }}
-          test-environment: ${{ inputs.test-environment }}
-          prod-environment: ${{ inputs.prod-environment }}
+          development-environment: ${{ inputs.development-environment }}
+          pre-release-environment: ${{ inputs.pre-release-environment }}
+          release-environment: ${{ inputs.release-environment }}
 
       # Fail fast on a typo; the provider would otherwise reject it per leg.
       - name: Validate tag-policy setting
@@ -190,7 +190,7 @@ jobs:
         with:
           environment: ${{ steps.trigger.outputs.environment }}
           version: ${{ steps.trigger.outputs.version }}
-          dev-environment: ${{ inputs.dev-environment }}
+          development-environment: ${{ inputs.development-environment }}
           github-token: ${{ github.token }}
 
       # Ephemeral only: gate (feedback tier, open PR) and resolve the PR number.
@@ -201,7 +201,7 @@ jobs:
         with:
           branch: ${{ steps.trigger.outputs.version }}
           environment: ${{ steps.trigger.outputs.environment }}
-          ephemeral-environment: ${{ inputs.dev-environment }}
+          ephemeral-environment: ${{ inputs.development-environment }}
 
       # Checks out the caller at the resolved version, to enumerate tfvars for 'all'.
       - name: Checkout

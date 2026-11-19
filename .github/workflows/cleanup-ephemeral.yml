@@ -4,7 +4,7 @@ name: Terraform Ephemeral Cleanup
 #   scope=all     closed/merged PRs only
 #   scope=pr-<n>  one PR, any state
 # Ungated: discover only lists pr-* workspaces and the guard confines it to the
-# dev-environment, so it reaches no shared or prod state. A scheduled scope=all caller runs unattended.
+# development-environment, so it reaches no shared or prod state. A scheduled scope=all caller runs unattended.
 on:
   workflow_call:
     inputs:
@@ -13,11 +13,11 @@ on:
         required: true
         type: string
       environment:
-        description: "The ephemeral environment to clean up. Must equal dev-environment; any other value is rejected."
+        description: "The ephemeral environment to clean up. Must equal development-environment; any other value is rejected."
         required: true
         type: string
-      dev-environment:
-        description: "Name of the environment that hosts ephemeral workspaces. Must match the dev-environment passed to deploy.yml."
+      development-environment:
+        description: "Name of the environment that hosts ephemeral workspaces. Must match the development-environment passed to deploy.yml."
         required: false
         type: string
         default: "dev"
@@ -84,10 +84,10 @@ jobs:
         shell: bash
         env:
           ENVIRONMENT: ${{ inputs.environment }}
-          DEV_ENVIRONMENT: ${{ inputs.dev-environment }}
+          DEVELOPMENT_ENVIRONMENT: ${{ inputs.development-environment }}
         run: |
-          if [[ -z "${DEV_ENVIRONMENT}" || "${ENVIRONMENT}" != "${DEV_ENVIRONMENT}" ]]; then
-            echo "::error::cleanup runs only in the ephemeral environment '${DEV_ENVIRONMENT}'; got '${ENVIRONMENT}'. It never touches shared or prod state."
+          if [[ -z "${DEVELOPMENT_ENVIRONMENT}" || "${ENVIRONMENT}" != "${DEVELOPMENT_ENVIRONMENT}" ]]; then
+            echo "::error::cleanup runs only in the ephemeral environment '${DEVELOPMENT_ENVIRONMENT}'; got '${ENVIRONMENT}'. It never touches shared or prod state."
             exit 1
           fi
 

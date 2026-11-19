@@ -7,14 +7,14 @@ inputs:
     required: true
   version:
     description: >-
-      Git ref being deployed. For test and prod it must be main, master, or a
+      Git ref being deployed. Outside the development environment it must be main, master, or a
       semver tag (v1.2.3 or 1.2.3, with an optional pre-release suffix such as
-      -rc.1), keeping them off arbitrary branches; the dev environment accepts
-      any ref.
+      -rc.1), keeping them off arbitrary branches; the development environment
+      accepts any ref.
     required: false
     default: ""
-  dev-environment:
-    description: "Name of the dev environment, which skips the version check."
+  development-environment:
+    description: "Environment for unreleased code, which skips the version check."
     required: false
     default: "dev"
   github-token:
@@ -25,7 +25,7 @@ runs:
   using: composite
   steps:
     - name: Validate version
-      if: ${{ inputs.environment != inputs.dev-environment }}
+      if: ${{ inputs.environment != inputs.development-environment }}
       shell: bash
       env:
         ENVIRONMENT: ${{ inputs.environment }}

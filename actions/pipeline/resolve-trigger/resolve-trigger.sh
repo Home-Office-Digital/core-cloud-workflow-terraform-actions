@@ -4,8 +4,8 @@
 #
 # Inputs (environment variables):
 #   EVENT_NAME, EVENT_PATH (empty => GITHUB_EVENT_PATH), INPUT_ENVIRONMENT,
-#   INPUT_VERSION, INPUT_EPHEMERAL, DEV_ENVIRONMENT, TEST_ENVIRONMENT,
-#   PROD_ENVIRONMENT
+#   INPUT_VERSION, INPUT_EPHEMERAL, DEVELOPMENT_ENVIRONMENT, PRE_RELEASE_ENVIRONMENT,
+#   RELEASE_ENVIRONMENT
 # Outputs (appended to GITHUB_OUTPUT): mode, skip, environment, version, ephemeral
 #
 # Payload fields are untrusted. Only the fields listed below are read, values
@@ -70,9 +70,9 @@ case "${event_name}" in
       && "${ref}" == "refs/heads/${default_branch}" \
       && "${deleted}" != "true" \
       && -n "${after}" \
-      && -n "${DEV_ENVIRONMENT:-}" ]]; then
+      && -n "${DEVELOPMENT_ENVIRONMENT:-}" ]]; then
       skip="false"
-      environment="${DEV_ENVIRONMENT}"
+      environment="${DEVELOPMENT_ENVIRONMENT}"
       version="${after}"
       ephemeral="false"
     fi
@@ -87,9 +87,9 @@ case "${event_name}" in
     reject_newlines "tag_name" "${tag_name}"
     target=""
     if [[ "${action}" == "published" && "${prerelease}" == "true" ]]; then
-      target="${TEST_ENVIRONMENT:-}"
+      target="${PRE_RELEASE_ENVIRONMENT:-}"
     elif [[ "${action}" == "released" ]]; then
-      target="${PROD_ENVIRONMENT:-}"
+      target="${RELEASE_ENVIRONMENT:-}"
     fi
     if [[ -n "${target}" && -n "${tag_name}" ]]; then
       skip="false"

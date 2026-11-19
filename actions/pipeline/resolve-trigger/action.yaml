@@ -27,15 +27,15 @@ inputs:
     description: "Ephemeral flag from a workflow_dispatch. Empty is treated as false."
     required: false
     default: ""
-  dev-environment:
-    description: "Environment deployed on a push to the default branch. Empty disables that event."
+  development-environment:
+    description: "Environment for unreleased code, deployed on a push to the default branch. Empty disables that event."
     required: false
     default: "dev"
-  test-environment:
+  pre-release-environment:
     description: "Environment deployed on a published pre-release. Empty disables that event."
     required: false
     default: "test"
-  prod-environment:
+  release-environment:
     description: "Environment deployed on a released (promoted or stable) release. Empty disables that event."
     required: false
     default: "prod"
@@ -69,7 +69,7 @@ runs:
         INPUT_ENVIRONMENT: ${{ inputs.environment }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_EPHEMERAL: ${{ inputs.ephemeral }}
-        DEV_ENVIRONMENT: ${{ inputs.dev-environment }}
-        TEST_ENVIRONMENT: ${{ inputs.test-environment }}
-        PROD_ENVIRONMENT: ${{ inputs.prod-environment }}
+        DEVELOPMENT_ENVIRONMENT: ${{ inputs.development-environment }}
+        PRE_RELEASE_ENVIRONMENT: ${{ inputs.pre-release-environment }}
+        RELEASE_ENVIRONMENT: ${{ inputs.release-environment }}
       run: ${{ github.action_path }}/resolve-trigger.sh

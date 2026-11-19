@@ -17,14 +17,14 @@ pr-validation:  expand    -> lint | test | validate (parallel)
 
 ## Triggers
 
-| Event | Environment | Version deployed |
+| Event | Environment (input, default) | Version deployed |
 | --- | --- | --- |
-| Push to the default branch | `dev` | Commit SHA |
-| Pre-release published | `test` | Release tag |
-| Release released (promoted or stable) | `prod` | Release tag |
+| Push to the default branch | `development-environment`, `dev` | Commit SHA |
+| Pre-release published | `pre-release-environment`, `test` | Release tag |
+| Release released (promoted or stable) | `release-environment`, `prod` | Release tag |
 | `workflow_dispatch` | Chosen environment | Chosen ref |
 
-Dispatch can narrow a run with `component` and `deployment` (a name, a comma list or `all`). Setting `ephemeral: true` deploys into a throwaway `pr-<n>-<deployment>` workspace in the dev environment; the branch must have an open PR. Event-driven runs always deploy everything. Publishing a stable release also fires `published`, which skips. Outside the dev environment, the version must be `main`, `master` or a semver tag.
+Dispatch can narrow a run with `component` and `deployment` (a name, a comma list or `all`). Setting `ephemeral: true` deploys into a throwaway `pr-<n>-<deployment>` workspace in the development environment; the branch must have an open PR. Event-driven runs always deploy everything. Publishing a stable release also fires `published`, which skips. Outside the development environment, the version must be `main`, `master` or a semver tag.
 
 ## Repository layout and config
 
@@ -66,7 +66,7 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 
 | Name | Used by | Default | Purpose |
 | --- | --- | --- | --- |
-| `dev-environment`, `test-environment`, `prod-environment` | deploy (`dev-environment` also cleanup) | `dev`, `test`, `prod` | Environment names for each trigger. An empty value disables that trigger. |
+| `development-environment`, `pre-release-environment`, `release-environment` | deploy (`development-environment` also cleanup) | `dev`, `test`, `prod` | The environment each trigger deploys to. `development-environment` also hosts ephemeral workspaces and skips the version check. An empty value disables that trigger. |
 | `pre-exec-script` | all | none | Shell script run before `terraform init`. `GITHUB_TOKEN`, `COMPONENT`, `DEPLOYMENT` and `ENVIRONMENT` are set. |
 | `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. The App token is used first, then `git_auth_token`; either becomes `GITHUB_TOKEN` in the script. |
 | `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`, exported as `TF_AWS_TAG_POLICY_COMPLIANCE`. |
@@ -156,7 +156,7 @@ jobs:
       terraform-version: ">= 1.15.0"
 ```
 
-The PR validation and cleanup callers have the same shape and call `pr-validation.yml` and `cleanup-ephemeral.yml`. PR validation triggers on `pull_request` for `source/terraform/**` and passes `environment: dev`. Cleanup runs weekly on a schedule and on dispatch with a `scope` input (`all` for closed or merged PRs, or `pr-<n>` for one PR in any state). It passes `scope: ${{ inputs.scope || 'all' }}` and `environment: dev`, which must equal `dev-environment`. Cleanup is ungated and only ever touches `pr-*` workspaces in that environment.
+The PR validation and cleanup callers have the same shape and call `pr-validation.yml` and `cleanup-ephemeral.yml`. PR validation triggers on `pull_request` for `source/terraform/**` and passes `environment: dev`. Cleanup runs weekly on a schedule and on dispatch with a `scope` input (`all` for closed or merged PRs, or `pr-<n>` for one PR in any state). It passes `scope: ${{ inputs.scope || 'all' }}` and `environment: dev`, which must equal `development-environment`. Cleanup is ungated and only ever touches `pr-*` workspaces in that environment.
 
 ## Composite actions
 

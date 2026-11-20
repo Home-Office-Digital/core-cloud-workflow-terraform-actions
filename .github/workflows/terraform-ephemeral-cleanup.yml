@@ -99,7 +99,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feat/configurable-terraform-dir
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
@@ -108,7 +108,7 @@ jobs:
       # Authenticates per leg, because legs can be in different accounts.
       - name: Discover orphan workspaces
         id: discover
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/discover-orphan-workspaces@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/discover-orphan-workspaces@feat/configurable-terraform-dir
         with:
           scope: ${{ inputs.scope }}
           environment: ${{ inputs.environment }}
@@ -135,14 +135,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feat/configurable-terraform-dir
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
 
       - name: Destroy workspaces
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/destroy-workspaces@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/destroy-workspaces@feat/configurable-terraform-dir
         with:
           workspaces: ${{ needs.discover.outputs.workspaces }}
           components-dir: ${{ inputs.terraform-dir }}/components

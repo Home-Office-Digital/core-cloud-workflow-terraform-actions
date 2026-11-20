@@ -147,7 +147,7 @@ jobs:
       # Full-path refs: the caller's checkout has no actions/ directory.
       - name: Resolve trigger
         id: trigger
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-trigger@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-trigger@feat/configurable-terraform-dir
         with:
           environment: ${{ inputs.environment }}
           version: ${{ inputs.version }}
@@ -175,7 +175,7 @@ jobs:
       # Version rule and gate check. Skipped for plan-only, which has no apply.
       - name: Verify preconditions
         if: ${{ steps.trigger.outputs.skip != 'true' && !inputs.plan-only }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/verify-preconditions@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/verify-preconditions@feat/configurable-terraform-dir
         with:
           environment: ${{ steps.trigger.outputs.environment }}
           version: ${{ steps.trigger.outputs.version }}
@@ -186,7 +186,7 @@ jobs:
       - name: Resolve ephemeral
         id: ephemeral
         if: ${{ steps.trigger.outputs.skip != 'true' && steps.trigger.outputs.ephemeral == 'true' }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/resolve-ephemeral@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/resolve-ephemeral@feat/configurable-terraform-dir
         with:
           branch: ${{ steps.trigger.outputs.version }}
           environment: ${{ steps.trigger.outputs.environment }}
@@ -202,7 +202,7 @@ jobs:
       # The whole file, every environment, before any leg plans.
       - name: Validate deployments.json
         if: ${{ steps.trigger.outputs.skip != 'true' }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feat/configurable-terraform-dir
         with:
           components-dir: ${{ inputs.terraform-dir }}/components
           deployments-file: ${{ inputs.deployments-file }}
@@ -211,7 +211,7 @@ jobs:
       - name: Expand deployments
         id: expand
         if: ${{ steps.trigger.outputs.skip != 'true' }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@feat/configurable-terraform-dir
         with:
           components-dir: ${{ inputs.terraform-dir }}/components
           # Selectors only apply to a manual dispatch; event-driven runs deploy all.
@@ -226,7 +226,7 @@ jobs:
       - name: Find test targets
         id: test-targets
         if: ${{ steps.trigger.outputs.skip != 'true' }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@feat/configurable-terraform-dir
         with:
           components-dir: ${{ inputs.terraform-dir }}/components
           modules-dir: ${{ inputs.terraform-dir }}/modules
@@ -236,7 +236,7 @@ jobs:
       # Runs even when an earlier step failed, so a stopped run still explains itself.
       - name: Write summary
         if: ${{ always() }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/deploy-summary@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/deploy-summary@feat/configurable-terraform-dir
         with:
           skip: ${{ steps.trigger.outputs.skip }}
           environment: ${{ steps.trigger.outputs.environment }}
@@ -266,7 +266,7 @@ jobs:
 
       # Checked on deploy too, because the development environment accepts any ref.
       - name: Terraform Fmt
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@feat/configurable-terraform-dir
         with:
           working-directory: ${{ inputs.terraform-dir }}
           recursive: true
@@ -299,7 +299,7 @@ jobs:
           ref: ${{ needs.preflight.outputs.version }}
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feat/configurable-terraform-dir
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
@@ -316,7 +316,7 @@ jobs:
         run: terraform init -backend=false -input=false
 
       - name: Terraform Test
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@feat/configurable-terraform-dir
         with:
           working-directory: ${{ matrix.target.dir }}
 
@@ -358,7 +358,7 @@ jobs:
 
       - name: Resolve leg config
         id: account
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feat/configurable-terraform-dir
         with:
           deployments-file: ${{ inputs.deployments-file }}
           terraform-dir: ${{ inputs.terraform-dir }}
@@ -367,14 +367,14 @@ jobs:
           deployment: ${{ matrix.deployment }}
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feat/configurable-terraform-dir
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
 
       - name: Terraform Init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feat/configurable-terraform-dir
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
@@ -393,13 +393,13 @@ jobs:
 
       - name: Terraform Validate
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@feat/configurable-terraform-dir
         with:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.component-working-directory }}
 
       - name: Terraform Plan
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@feat/configurable-terraform-dir
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
@@ -450,7 +450,7 @@ jobs:
 
       - name: Resolve leg config
         id: account
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feat/configurable-terraform-dir
         with:
           deployments-file: ${{ inputs.deployments-file }}
           terraform-dir: ${{ inputs.terraform-dir }}
@@ -459,14 +459,14 @@ jobs:
           deployment: ${{ matrix.deployment }}
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feat/configurable-terraform-dir
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
           git-auth-token: ${{ secrets.git_auth_token }}
 
       - name: Terraform Init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feat/configurable-terraform-dir
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
@@ -485,7 +485,7 @@ jobs:
 
       # Applies the saved plan; Terraform refuses it if the state has moved on.
       - name: Terraform Apply
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/apply@feat/configurable-terraform-dir
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}

@@ -45,6 +45,11 @@ on:
         required: false
         type: string
         default: "source/terraform/deployments.json"
+      terraform-dir:
+        description: "Directory holding components/, modules/ and deployments.json. No leading ./ or trailing /."
+        required: false
+        type: string
+        default: "source/terraform"
       tf-aws-tag-policy-compliance:
         description: "AWS provider tag-policy compliance: 'warning', 'error' or empty. Exported as TF_AWS_TAG_POLICY_COMPLIANCE. Same as standard-pipeline."
         required: false
@@ -117,26 +122,30 @@ jobs:
       # The whole file, every environment, so a broken config fails the PR.
       - name: Validate deployments.json
         if: ${{ inputs.plan }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feat/configurable-terraform-dir
         with:
           deployments-file: ${{ inputs.deployments-file }}
+          components-dir: ${{ inputs.terraform-dir }}/components
 
       - name: Expand deployments
         id: expand
         if: ${{ inputs.plan }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@feat/configurable-terraform-dir
         with:
           component: all
           deployment: all
           environment: ${{ inputs.environment }}
+          components-dir: ${{ inputs.terraform-dir }}/components
           # As in deploy: components without this environment are skipped with a notice.
           missing-environment: skip
 
       - name: Find test targets
         id: test-targets
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@feat/configurable-terraform-dir
         with:
           include-modules: "true"
+          components-dir: ${{ inputs.terraform-dir }}/components
+          modules-dir: ${{ inputs.terraform-dir }}/modules
 
       # Runs even when an earlier step failed, so a stopped run still explains itself.
       - name: Write summary
@@ -166,7 +175,7 @@ jobs:
             echo "- **Tests:** ${tests}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # fmt and TFLint over source/terraform, once per run.
+  # fmt and TFLint over the Terraform directory, once per run.
   lint:
     name: "Lint"
     needs: preflight
@@ -179,16 +188,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Terraform Fmt
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@feat/configurable-terraform-dir
         with:
-          working-directory: source/terraform
+          working-directory: ${{ inputs.terraform-dir }}
           recursive: true
           terraform-version: ${{ inputs.terraform-version }}
 
       - name: TFLint
         uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@268b840d0e48fa86be281a5727909655311f7af4 # 0.3.2
         with:
-          working_directory: source/terraform
+          working_directory: ${{ inputs.terraform-dir }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -210,7 +219,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feat/configurable-terraform-dir
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
@@ -227,7 +236,7 @@ jobs:
         run: terraform init -backend=false -input=false
 
       - name: Terraform Test
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@feat/configurable-terraform-dir
         with:
           working-directory: ${{ matrix.target.dir }}
 
@@ -253,7 +262,7 @@ jobs:
       DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
       DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
       TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
-      component-working-directory: source/terraform/components/${{ matrix.component }}
+      component-working-directory: ${{ inputs.terraform-dir }}/components/${{ matrix.component }}
 
     steps:
       - name: Checkout
@@ -261,15 +270,16 @@ jobs:
 
       - name: Resolve leg config
         id: account
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feat/configurable-terraform-dir
         with:
           deployments-file: ${{ inputs.deployments-file }}
           component: ${{ matrix.component }}
           environment: ${{ inputs.environment }}
           deployment: ${{ matrix.deployment }}
+          terraform-dir: ${{ inputs.terraform-dir }}
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feat/configurable-terraform-dir
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
@@ -277,7 +287,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feat/configurable-terraform-dir
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
@@ -294,14 +304,14 @@ jobs:
 
       - name: Terraform Validate
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@feat/configurable-terraform-dir
         with:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.component-working-directory }}
 
       - name: Terraform Plan
         id: plan
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@1.3.0
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@feat/configurable-terraform-dir
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}

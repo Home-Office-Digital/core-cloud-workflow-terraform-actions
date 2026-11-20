@@ -21,6 +21,10 @@ inputs:
   deployment:
     description: "Deployment name for this leg (third segment of the key)."
     required: true
+  terraform-dir:
+    description: "Directory holding components/, modules/ and deployments.json. No leading ./ or trailing /."
+    required: false
+    default: "source/terraform"
 
 outputs:
   account-id:
@@ -36,7 +40,7 @@ outputs:
     description: "The resolved Terraform state bucket name."
     value: ${{ steps.resolve.outputs.state-bucket-name }}
   state-key:
-    description: "The Terraform state key for this leg: <repo>/<component>/<env>/<deployment>/terraform.tfstate."
+    description: "The Terraform state key for this leg: <repo>/<component>/<env>/<deployment>/terraform.tfstate, or <repo>/<terraform-dir>/<component>/... when terraform-dir is not source/terraform."
     value: ${{ steps.resolve.outputs.state-key }}
 
 runs:
@@ -50,4 +54,5 @@ runs:
         COMPONENT: ${{ inputs.component }}
         ENVIRONMENT: ${{ inputs.environment }}
         DEPLOYMENT: ${{ inputs.deployment }}
+        TERRAFORM_DIR: ${{ inputs.terraform-dir }}
       run: ${{ github.action_path }}/resolve-account.sh

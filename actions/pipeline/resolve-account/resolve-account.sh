@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Look up one leg's account, roles and state bucket, and build its state key.
-# Env: DEPLOYMENTS_FILE, COMPONENT, ENVIRONMENT, DEPLOYMENT.
+# Env: DEPLOYMENTS_FILE, COMPONENT, ENVIRONMENT, DEPLOYMENT, TERRAFORM_DIR.
 # Writes: account-id, plan-role-name, apply-role-name, state-bucket-name,
 #         state-key (GITHUB_OUTPUT).
 set -euo pipefail
@@ -19,8 +19,13 @@ plan_role_name="$(jq -r '.plan_role_name' <<< "${entry}")"
 apply_role_name="$(jq -r '.apply_role_name' <<< "${entry}")"
 state_bucket_name="$(jq -r '.state_bucket_name' <<< "${entry}")"
 
-# Prefixed with the repo name, so repos sharing a bucket can't collide.
-state_key="${GITHUB_REPOSITORY##*/}/${key}/terraform.tfstate"
+# Prefixed with the repo name, so repos sharing a bucket can't collide. A
+# non-default folder is added too, so folders in one repo can't collide.
+prefix="${GITHUB_REPOSITORY##*/}"
+if [[ "${TERRAFORM_DIR:-source/terraform}" != "source/terraform" ]]; then
+  prefix="${prefix}/${TERRAFORM_DIR}"
+fi
+state_key="${prefix}/${key}/terraform.tfstate"
 
 # Role and bucket names aren't secret; the account id is masked.
 echo "::add-mask::${account_id}"

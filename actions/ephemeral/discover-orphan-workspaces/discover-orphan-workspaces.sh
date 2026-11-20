@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # List the pr-* workspaces to destroy for a scope.
 # Env: SCOPE, ENVIRONMENT, COMPONENTS_DIR, DEPLOYMENTS_FILE, STATE_REGION, REPO,
-#      GH_TOKEN.
+#      TERRAFORM_DIR, GH_TOKEN.
 # Writes: workspaces, one '<component> <deployment> <workspace>' per line
 #         (GITHUB_OUTPUT).
 set -euo pipefail
@@ -73,10 +73,15 @@ for dir in "${COMPONENTS_DIR}"/*/; do
     IFS=$'\t' read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "${creds}"
     export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 
-    # Same state key and workspace prefix as the deploy workflow.
+    # Same state key and workspace prefix as the deploy workflow. The key
+    # carries the folder when it isn't the default.
+    prefix="${GITHUB_REPOSITORY##*/}"
+    if [[ "${TERRAFORM_DIR:-source/terraform}" != "source/terraform" ]]; then
+      prefix="${prefix}/${TERRAFORM_DIR}"
+    fi
     terraform -chdir="${dir}" init -input=false \
       -backend-config="bucket=${state_bucket_name}" \
-      -backend-config="key=${GITHUB_REPOSITORY##*/}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
+      -backend-config="key=${prefix}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
       -backend-config="region=${STATE_REGION}" \
       -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}" \
       -backend-config="use_lockfile=true" \

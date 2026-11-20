@@ -13,7 +13,13 @@ deploy:         preflight -> lint | test | plan (parallel) -> approval gate -> a
 pr-validation:  preflight -> lint | test | plan (parallel)
 ```
 
-`preflight` decides what runs: it resolves the trigger to an environment and version, checks preconditions, validates `deployments.json` and expands the selectors into a leg matrix. A skipped trigger stops the run there. `lint` runs `terraform fmt` and TFLint once over `source/terraform`. `test` runs `terraform test` once per component, and per module in PR validation, with `init -backend=false`, so it never touches state or AWS. `plan` and `apply` run once per leg. Each plan uses the read-only plan role and uploads its plan file, and apply uses the apply role to apply that file. `apply` needs `lint`, `test` and `plan` to succeed; `test` may be skipped when no component has tests. `terraform-pr-validation.yml` has no apply job and no gate. `terraform-multi-env-deploy.yml` with `plan-only: true` plans every leg and stops, with no gate, for change-control evidence against any environment.
+- `preflight`: resolves the trigger to an environment and version, checks preconditions, validates `deployments.json` and expands the selectors into a leg matrix. A skipped trigger stops the run here.
+- `lint`: runs `terraform fmt` and TFLint once over the Terraform directory (`terraform-dir`, default `source/terraform`).
+- `test`: runs `terraform test` once per component, and per module in PR validation, with `init -backend=false`, so it never touches state or AWS.
+- `plan`: runs once per leg with the read-only plan role and uploads its plan file.
+- `apply`: runs once per leg with the apply role and applies that plan file. It needs `lint`, `test` and `plan` to succeed; `test` may be skipped when no component has tests.
+
+`terraform-pr-validation.yml` has no apply job and no gate. `terraform-multi-env-deploy.yml` with `plan-only: true` plans every leg and stops, with no gate, for change-control evidence against any environment.
 
 ## Triggers
 
@@ -66,17 +72,18 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 
 | Name | Used by | Default | Purpose |
 | --- | --- | --- | --- |
-| `development-environment`, `pre-release-environment`, `release-environment` | deploy (`development-environment` also cleanup) | `dev`, `test`, `prod` | The environment each trigger deploys to. `development-environment` also hosts ephemeral workspaces and skips the version check. An empty value disables that trigger. |
-| `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. With both App secrets set, the workflow mints an App token; otherwise it uses `git_auth_token`. It then points git at the token for `github.com` (HTTPS and SSH URLs) for the rest of the job. Setting only one App secret fails the run. There is no `pre-exec-script`: a `standard-pipeline` caller passes the same secrets and drops its `insteadOf` script. |
-| `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`, exported as `TF_AWS_TAG_POLICY_COMPLIANCE`. |
+| `development-environment`, `pre-release-environment`, `release-environment` | deploy (`development-environment` also cleanup) | `dev`, `test`, `prod` | Environment each trigger deploys to. An empty value disables that trigger. `development-environment` also hosts ephemeral workspaces. |
+| `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. Both App secrets mint an App token; otherwise `git_auth_token` is used. Set both App secrets or neither. Replaces `pre-exec-script`. Git uses the token for `github.com` for the rest of the job. |
+| `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`. Sets `TF_AWS_TAG_POLICY_COMPLIANCE`. |
 | `DYNATRACE_ENVIRONMENT_ID`, `DYNATRACE_PLATFORM_TOKEN` | all | none | Dynatrace provider credentials. |
-| `runner` | all | `ubuntu-latest` | Runner for the jobs that run Terraform against real providers. |
-| `plan` | pr-validation | `true` | Set `false` for a module-only repository: only `lint` and `test` run, with no `deployments.json`, AWS access or state, GitHub checks every job's permissions before the run starts, so the caller still grants `contents: read` and `id-token: write`; no token is requested. |
-| `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Terraform version. Pass an exact version to deploy: plan and apply resolve a range separately, so a release landing while apply waits at the gate makes Terraform refuse the saved plan. |
-| `aws-region` | all | `eu-west-2` | Region for the state backend. |
-| `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. |
+| `runner` | all | `ubuntu-latest` | Runner for jobs that call real providers. |
+| `plan` | pr-validation | `true` | Set `false` for a module-only repository: only `lint` and `test` run, with no AWS access or state. The caller still grants `contents: read` and `id-token: write`. |
+| `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Use an exact version for deploy. A range can resolve differently at apply and invalidate the saved plan. |
+| `aws-region` | all | `eu-west-2` | State backend region. |
+| `terraform-dir` | deploy, pr-validation, cleanup | `source/terraform` | Folder holding `components/`, `modules/` and `deployments.json`. No leading `./` or trailing `/`. |
+| `deployments-file` | all | `source/terraform/deployments.json` | Set to `<terraform-dir>/deployments.json` when using another folder. |
 
-SonarQube runs in the repository's own scan workflow. `terraform-pr-validation.yml` still accepts `sonar_host_url` and `sonar_token` so existing callers keep working, and ignores them.
+`terraform-pr-validation.yml` accepts `sonar_host_url` and `sonar_token` for existing callers and ignores them.
 
 ## Example caller
 
@@ -151,6 +158,12 @@ jobs:
 ```
 
 The PR validation and cleanup callers have the same shape and call `terraform-pr-validation.yml` and `terraform-ephemeral-cleanup.yml`. PR validation triggers on `pull_request` for `source/terraform/**` and passes `environment: dev`. Cleanup runs weekly on a schedule and on dispatch with a `scope` input (`all` for closed or merged PRs, or `pr-<n>` for one PR in any state). It passes `scope: ${{ inputs.scope || 'all' }}` and `environment: dev`, which must equal `development-environment`. Cleanup is ungated and only ever touches `pr-*` workspaces in that environment.
+
+## Using a different Terraform folder
+
+- A non-default folder is added to the state key: `<repo>/<terraform-dir>/<component>/<environment>/<deployment>/terraform.tfstate`. The default key is unchanged.
+- Moving the folder after the first deploy points at fresh state.
+- Use one caller workflow per folder, each with its own ephemeral cleanup caller passing the same `terraform-dir`.
 
 ## Composite actions
 

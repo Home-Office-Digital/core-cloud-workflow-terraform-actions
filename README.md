@@ -74,7 +74,8 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 | `plan` | pr-validation | `true` | Set `false` for a module-only repository: only `lint` and `test` run, with no `deployments.json`, AWS access or state, GitHub checks every job's permissions before the run starts, so the caller still grants `contents: read` and `id-token: write`; no token is requested. |
 | `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Terraform version. Pass an exact version to deploy: plan and apply resolve a range separately, so a release landing while apply waits at the gate makes Terraform refuse the saved plan. |
 | `aws-region` | all | `eu-west-2` | Region for the state backend. |
-| `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. |
+| `terraform-dir` | deploy, pr-validation, cleanup | `source/terraform` | Folder holding `components/`, `modules/` and `deployments.json`. No leading `./` or trailing `/`. |
+| `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. Set it to `<terraform-dir>/deployments.json` when using another folder. |
 
 SonarQube runs in the repository's own scan workflow. `terraform-pr-validation.yml` still accepts `sonar_host_url` and `sonar_token` so existing callers keep working, and ignores them.
 
@@ -151,6 +152,12 @@ jobs:
 ```
 
 The PR validation and cleanup callers have the same shape and call `terraform-pr-validation.yml` and `terraform-ephemeral-cleanup.yml`. PR validation triggers on `pull_request` for `source/terraform/**` and passes `environment: dev`. Cleanup runs weekly on a schedule and on dispatch with a `scope` input (`all` for closed or merged PRs, or `pr-<n>` for one PR in any state). It passes `scope: ${{ inputs.scope || 'all' }}` and `environment: dev`, which must equal `development-environment`. Cleanup is ungated and only ever touches `pr-*` workspaces in that environment.
+
+## Using a different Terraform folder
+
+- A non-default folder is added to the state key: `<repo>/<terraform-dir>/<component>/<environment>/<deployment>/terraform.tfstate`. The default key is unchanged.
+- Moving the folder after the first deploy points at fresh state.
+- Use one caller workflow per folder, each with its own ephemeral cleanup caller passing the same `terraform-dir`.
 
 ## Composite actions
 

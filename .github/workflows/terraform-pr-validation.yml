@@ -45,6 +45,11 @@ on:
         required: false
         type: string
         default: "source/terraform/deployments.json"
+      terraform-dir:
+        description: "Directory holding components/, modules/ and deployments.json. No leading ./ or trailing /."
+        required: false
+        type: string
+        default: "source/terraform"
       tf-aws-tag-policy-compliance:
         description: "AWS provider tag-policy compliance: 'warning', 'error' or empty. Exported as TF_AWS_TAG_POLICY_COMPLIANCE. Same as standard-pipeline."
         required: false
@@ -120,6 +125,7 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@1.3.0
         with:
           deployments-file: ${{ inputs.deployments-file }}
+          components-dir: ${{ inputs.terraform-dir }}/components
 
       - name: Expand deployments
         id: expand
@@ -129,6 +135,7 @@ jobs:
           component: all
           deployment: all
           environment: ${{ inputs.environment }}
+          components-dir: ${{ inputs.terraform-dir }}/components
           # As in deploy: components without this environment are skipped with a notice.
           missing-environment: skip
 
@@ -137,6 +144,8 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@1.3.0
         with:
           include-modules: "true"
+          components-dir: ${{ inputs.terraform-dir }}/components
+          modules-dir: ${{ inputs.terraform-dir }}/modules
 
       # Runs even when an earlier step failed, so a stopped run still explains itself.
       - name: Write summary
@@ -166,7 +175,7 @@ jobs:
             echo "- **Tests:** ${tests}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # fmt and TFLint over source/terraform, once per run.
+  # fmt and TFLint over the Terraform directory, once per run.
   lint:
     name: "Lint"
     needs: preflight
@@ -181,14 +190,14 @@ jobs:
       - name: Terraform Fmt
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@1.3.0
         with:
-          working-directory: source/terraform
+          working-directory: ${{ inputs.terraform-dir }}
           recursive: true
           terraform-version: ${{ inputs.terraform-version }}
 
       - name: TFLint
         uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@268b840d0e48fa86be281a5727909655311f7af4 # 0.3.2
         with:
-          working_directory: source/terraform
+          working_directory: ${{ inputs.terraform-dir }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -253,7 +262,7 @@ jobs:
       DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
       DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
       TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
-      component-working-directory: source/terraform/components/${{ matrix.component }}
+      component-working-directory: ${{ inputs.terraform-dir }}/components/${{ matrix.component }}
 
     steps:
       - name: Checkout
@@ -267,6 +276,7 @@ jobs:
           component: ${{ matrix.component }}
           environment: ${{ inputs.environment }}
           deployment: ${{ matrix.deployment }}
+          terraform-dir: ${{ inputs.terraform-dir }}
 
       - name: Git auth
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0

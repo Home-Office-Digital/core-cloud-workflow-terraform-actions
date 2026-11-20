@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: ">= 1.10.0"
+      terraform-dir:
+        description: "Directory holding components/, modules/ and deployments.json. No leading ./ or trailing /. Must match the terraform-dir passed to terraform-multi-env-deploy.yml."
+        required: false
+        type: string
+        default: "source/terraform"
       deployments-file:
         description: >-
           Path to deployments.json, keyed "<component>/<env>/<deployment>".
@@ -107,6 +112,8 @@ jobs:
         with:
           scope: ${{ inputs.scope }}
           environment: ${{ inputs.environment }}
+          components-dir: ${{ inputs.terraform-dir }}/components
+          terraform-dir: ${{ inputs.terraform-dir }}
           deployments-file: ${{ inputs.deployments-file }}
           aws-region: ${{ inputs.aws-region }}
 
@@ -138,6 +145,8 @@ jobs:
         uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/ephemeral/destroy-workspaces@1.3.0
         with:
           workspaces: ${{ needs.discover.outputs.workspaces }}
+          components-dir: ${{ inputs.terraform-dir }}/components
+          terraform-dir: ${{ inputs.terraform-dir }}
           deployments-file: ${{ inputs.deployments-file }}
           environment: ${{ inputs.environment }}
           aws-region: ${{ inputs.aws-region }}

@@ -72,18 +72,18 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 
 | Name | Used by | Default | Purpose |
 | --- | --- | --- | --- |
-| `development-environment`, `pre-release-environment`, `release-environment` | deploy (`development-environment` also cleanup) | `dev`, `test`, `prod` | The environment each trigger deploys to. `development-environment` also hosts ephemeral workspaces and skips the version check. An empty value disables that trigger. |
-| `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. With both App secrets set, the workflow mints an App token; otherwise it uses `git_auth_token`. It then points git at the token for `github.com` (HTTPS and SSH URLs) for the rest of the job. Setting only one App secret fails the run. There is no `pre-exec-script`: a `standard-pipeline` caller passes the same secrets and drops its `insteadOf` script. |
-| `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`, exported as `TF_AWS_TAG_POLICY_COMPLIANCE`. |
+| `development-environment`, `pre-release-environment`, `release-environment` | deploy (`development-environment` also cleanup) | `dev`, `test`, `prod` | Environment each trigger deploys to. An empty value disables that trigger. `development-environment` also hosts ephemeral workspaces. |
+| `github_app_client_id`, `github_app_private_key`, `git_auth_token` | all | none | Credentials for private module sources. Both App secrets mint an App token; otherwise `git_auth_token` is used. Set both App secrets or neither. Replaces `pre-exec-script`. Git uses the token for `github.com` for the rest of the job. |
+| `tf-aws-tag-policy-compliance` | deploy, pr-validation | none | `warning` or `error`. Sets `TF_AWS_TAG_POLICY_COMPLIANCE`. |
 | `DYNATRACE_ENVIRONMENT_ID`, `DYNATRACE_PLATFORM_TOKEN` | all | none | Dynatrace provider credentials. |
-| `runner` | all | `ubuntu-latest` | Runner for the jobs that run Terraform against real providers. |
-| `plan` | pr-validation | `true` | Set `false` for a module-only repository: only `lint` and `test` run, with no `deployments.json`, AWS access or state, GitHub checks every job's permissions before the run starts, so the caller still grants `contents: read` and `id-token: write`; no token is requested. |
-| `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Terraform version. Pass an exact version to deploy: plan and apply resolve a range separately, so a release landing while apply waits at the gate makes Terraform refuse the saved plan. |
-| `aws-region` | all | `eu-west-2` | Region for the state backend. |
+| `runner` | all | `ubuntu-latest` | Runner for jobs that call real providers. |
+| `plan` | pr-validation | `true` | Set `false` for a module-only repository: only `lint` and `test` run, with no AWS access or state. The caller still grants `contents: read` and `id-token: write`. |
+| `terraform-version` | all | deploy `1.17.2`, others `>= 1.10.0` | Use an exact version for deploy. A range can resolve differently at apply and invalidate the saved plan. |
+| `aws-region` | all | `eu-west-2` | State backend region. |
 | `terraform-dir` | deploy, pr-validation, cleanup | `source/terraform` | Folder holding `components/`, `modules/` and `deployments.json`. No leading `./` or trailing `/`. |
-| `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. Set it to `<terraform-dir>/deployments.json` when using another folder. |
+| `deployments-file` | all | `source/terraform/deployments.json` | Set to `<terraform-dir>/deployments.json` when using another folder. |
 
-SonarQube runs in the repository's own scan workflow. `terraform-pr-validation.yml` still accepts `sonar_host_url` and `sonar_token` so existing callers keep working, and ignores them.
+`terraform-pr-validation.yml` accepts `sonar_host_url` and `sonar_token` for existing callers and ignores them.
 
 ## Example caller
 

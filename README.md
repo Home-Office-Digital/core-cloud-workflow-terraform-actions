@@ -139,7 +139,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/.github/workflows/terraform-multi-env-deploy.yml@<tag>
+    uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/.github/workflows/terraform-multi-env-deploy.yml@1.3.0
     with:
       component: ${{ inputs.component }}
       deployment: ${{ inputs.deployment }}

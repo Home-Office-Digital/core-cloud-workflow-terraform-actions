@@ -117,14 +117,14 @@ jobs:
       # The whole file, every environment, so a broken config fails the PR.
       - name: Validate deployments.json
         if: ${{ inputs.plan }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@1.3.0
         with:
           deployments-file: ${{ inputs.deployments-file }}
 
       - name: Expand deployments
         id: expand
         if: ${{ inputs.plan }}
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@1.3.0
         with:
           component: all
           deployment: all
@@ -134,7 +134,7 @@ jobs:
 
       - name: Find test targets
         id: test-targets
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@1.3.0
         with:
           include-modules: "true"
 
@@ -179,7 +179,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Terraform Fmt
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@1.3.0
         with:
           working-directory: source/terraform
           recursive: true
@@ -210,7 +210,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
@@ -227,7 +227,7 @@ jobs:
         run: terraform init -backend=false -input=false
 
       - name: Terraform Test
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@1.3.0
         with:
           working-directory: ${{ matrix.target.dir }}
 
@@ -261,7 +261,7 @@ jobs:
 
       - name: Resolve leg config
         id: account
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@1.3.0
         with:
           deployments-file: ${{ inputs.deployments-file }}
           component: ${{ matrix.component }}
@@ -269,7 +269,7 @@ jobs:
           deployment: ${{ matrix.deployment }}
 
       - name: Git auth
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
         with:
           github-app-client-id: ${{ secrets.github_app_client_id }}
           github-app-private-key: ${{ secrets.github_app_private_key }}
@@ -277,7 +277,7 @@ jobs:
 
       - name: Terraform Init
         id: init
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@1.3.0
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}
@@ -294,14 +294,14 @@ jobs:
 
       - name: Terraform Validate
         if: success() || failure()
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@1.3.0
         with:
           terraform-version: ${{ inputs.terraform-version }}
           working-directory: ${{ env.component-working-directory }}
 
       - name: Terraform Plan
         id: plan
-        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@feature/add-new-terraform-workflows
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@1.3.0
         with:
           account_id: ${{ steps.account.outputs.account-id }}
           aws-region: ${{ inputs.aws-region }}

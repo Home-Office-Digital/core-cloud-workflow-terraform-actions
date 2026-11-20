@@ -59,9 +59,9 @@ inputs:
     default: "true"
     type: boolean
   workspace:
-    description: "Terraform workspace to select. Leave as 'default' for a normal deploy; a non-default value (e.g. an ephemeral pr-<n>-<deployment>) is selected or created after init."
+    description: "Terraform workspace to select or create after init. Leave unset to skip selection (existing behaviour). Any value, including 'default', is selected explicitly, so a workspace left over from an earlier init in the same directory is never reused by mistake."
     required: false
-    default: "default"
+    default: ""
     type: string
   working-directory:
     description: "Directory containing main.tf"
@@ -210,10 +210,12 @@ runs:
 
         eval terraform init $INIT_OPTS
 
-    # Skipped for the default workspace, so the normal path is unchanged. The
-    # selection persists in .terraform/environment for later plan/apply steps.
+    # Skipped only when workspace is unset, so callers that don't pass it keep
+    # the existing command sequence. An explicit 'default' is selected too: init
+    # keeps any earlier selection in .terraform/environment, so skipping it could
+    # leave a pr-* workspace active. The selection persists for later steps.
     - name: Select Terraform workspace
-      if: ${{ inputs.workspace != '' && inputs.workspace != 'default' }}
+      if: ${{ inputs.workspace != '' }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:

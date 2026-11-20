@@ -14,6 +14,8 @@ REQUIRED_FIELDS=(
 
 DEPLOYMENTS_FILE="${1:?deployments-file required}"
 COMPONENTS_DIR="${2:?components-dir required}"
+# Drop a trailing slash so the sed pattern below matches find's output.
+COMPONENTS_DIR="${COMPONENTS_DIR%/}"
 
 problems=()
 

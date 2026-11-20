@@ -17,7 +17,7 @@ on:
         required: true
         type: string
       development-environment:
-        description: "Name of the environment that hosts ephemeral workspaces. Must match the development-environment passed to deploy.yml."
+        description: "Name of the environment that hosts ephemeral workspaces. Must match the development-environment passed to terraform-multi-env-deploy.yml."
         required: false
         type: string
         default: "dev"

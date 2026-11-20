@@ -4,16 +4,16 @@ Reusable GitHub Actions workflows that lint, test, plan and apply Terraform acro
 
 ## Reusable workflows
 
-- [`deploy.yml`](.github/workflows/deploy.yml): lints, tests, plans and applies the components and deployments of one environment, with an approval gate before apply.
-- [`pr-validation.yml`](.github/workflows/pr-validation.yml): lints, tests, validates and plans every component on a pull request. It never applies.
-- [`cleanup-ephemeral.yml`](.github/workflows/cleanup-ephemeral.yml): destroys the per-PR workspaces that ephemeral deploys create.
+- [`terraform-multi-env-deploy.yml`](.github/workflows/terraform-multi-env-deploy.yml): lints, tests, plans and applies the components and deployments of one environment, with an approval gate before apply.
+- [`terraform-pr-validation.yml`](.github/workflows/terraform-pr-validation.yml): lints, tests, validates and plans every component on a pull request. It never applies.
+- [`terraform-ephemeral-cleanup.yml`](.github/workflows/terraform-ephemeral-cleanup.yml): destroys the per-PR workspaces that ephemeral deploys create.
 
 ```text
 deploy:         preflight -> lint | test | plan (parallel) -> approval gate -> apply
 pr-validation:  preflight -> lint | test | plan (parallel)
 ```
 
-`preflight` decides what runs: it resolves the trigger to an environment and version, checks preconditions, validates `deployments.json` and expands the selectors into a leg matrix. A skipped trigger stops the run there. `lint` runs `terraform fmt` and TFLint once over `source/terraform`. `test` runs `terraform test` once per component, and per module in PR validation, with `init -backend=false`, so it never touches state or AWS. `plan` and `apply` run once per leg. Each plan uses the read-only plan role and uploads its plan file, and apply uses the apply role to apply that file. `apply` needs `lint`, `test` and `plan` to succeed; `test` may be skipped when no component has tests. `pr-validation.yml` has no apply job and no gate. `deploy.yml` with `plan-only: true` plans every leg and stops, with no gate, for change-control evidence against any environment.
+`preflight` decides what runs: it resolves the trigger to an environment and version, checks preconditions, validates `deployments.json` and expands the selectors into a leg matrix. A skipped trigger stops the run there. `lint` runs `terraform fmt` and TFLint once over `source/terraform`. `test` runs `terraform test` once per component, and per module in PR validation, with `init -backend=false`, so it never touches state or AWS. `plan` and `apply` run once per leg. Each plan uses the read-only plan role and uploads its plan file, and apply uses the apply role to apply that file. `apply` needs `lint`, `test` and `plan` to succeed; `test` may be skipped when no component has tests. `terraform-pr-validation.yml` has no apply job and no gate. `terraform-multi-env-deploy.yml` with `plan-only: true` plans every leg and stops, with no gate, for change-control evidence against any environment.
 
 ## Triggers
 
@@ -76,7 +76,7 @@ The file is validated on every PR and at the start of every deploy. It fails on 
 | `aws-region` | all | `eu-west-2` | Region for the state backend. |
 | `deployments-file` | all | `source/terraform/deployments.json` | Path to `deployments.json`. |
 
-SonarQube runs in the repository's own scan workflow. `pr-validation.yml` still accepts `sonar_host_url` and `sonar_token` so existing callers keep working, and ignores them.
+SonarQube runs in the repository's own scan workflow. `terraform-pr-validation.yml` still accepts `sonar_host_url` and `sonar_token` so existing callers keep working, and ignores them.
 
 ## Example caller
 
@@ -139,7 +139,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/.github/workflows/deploy.yml@<tag>
+    uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/.github/workflows/terraform-multi-env-deploy.yml@<tag>
     with:
       component: ${{ inputs.component }}
       deployment: ${{ inputs.deployment }}
@@ -150,7 +150,7 @@ jobs:
       terraform-version: "1.17.2"
 ```
 
-The PR validation and cleanup callers have the same shape and call `pr-validation.yml` and `cleanup-ephemeral.yml`. PR validation triggers on `pull_request` for `source/terraform/**` and passes `environment: dev`. Cleanup runs weekly on a schedule and on dispatch with a `scope` input (`all` for closed or merged PRs, or `pr-<n>` for one PR in any state). It passes `scope: ${{ inputs.scope || 'all' }}` and `environment: dev`, which must equal `development-environment`. Cleanup is ungated and only ever touches `pr-*` workspaces in that environment.
+The PR validation and cleanup callers have the same shape and call `terraform-pr-validation.yml` and `terraform-ephemeral-cleanup.yml`. PR validation triggers on `pull_request` for `source/terraform/**` and passes `environment: dev`. Cleanup runs weekly on a schedule and on dispatch with a `scope` input (`all` for closed or merged PRs, or `pr-<n>` for one PR in any state). It passes `scope: ${{ inputs.scope || 'all' }}` and `environment: dev`, which must equal `development-environment`. Cleanup is ungated and only ever touches `pr-*` workspaces in that environment.
 
 ## Composite actions
 

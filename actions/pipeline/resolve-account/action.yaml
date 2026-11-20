@@ -21,6 +21,9 @@ inputs:
   deployment:
     description: "Deployment name for this leg (third segment of the key)."
     required: true
+  state-prefix:
+    description: "The start of the state key: the repo name, plus the terraform-dir when it is not the default. Output by resolve-terraform-dir."
+    required: true
 
 outputs:
   account-id:
@@ -36,8 +39,14 @@ outputs:
     description: "The resolved Terraform state bucket name."
     value: ${{ steps.resolve.outputs.state-bucket-name }}
   state-key:
-    description: "The Terraform state key for this leg: <repo>/<component>/<env>/<deployment>/terraform.tfstate."
+    description: "The Terraform state key for this leg: <state-prefix>/<component>/<env>/<deployment>/terraform.tfstate."
     value: ${{ steps.resolve.outputs.state-key }}
+  state-lock-table-name:
+    description: "The entry's state_lock_table_name, or empty for S3-native locking."
+    value: ${{ steps.resolve.outputs.state-lock-table-name }}
+  state-use-lockfile:
+    description: "'true' for S3-native locking, 'false' when the entry uses a DynamoDB lock table."
+    value: ${{ steps.resolve.outputs.state-use-lockfile }}
 
 runs:
   using: "composite"
@@ -50,4 +59,5 @@ runs:
         COMPONENT: ${{ inputs.component }}
         ENVIRONMENT: ${{ inputs.environment }}
         DEPLOYMENT: ${{ inputs.deployment }}
+        STATE_PREFIX: ${{ inputs.state-prefix }}
       run: ${{ github.action_path }}/resolve-account.sh

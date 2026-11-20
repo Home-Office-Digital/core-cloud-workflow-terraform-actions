@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # List the pr-* workspaces to destroy for a scope.
 # Env: SCOPE, ENVIRONMENT, COMPONENTS_DIR, DEPLOYMENTS_FILE, STATE_REGION, REPO,
-#      GH_TOKEN.
+#      STATE_PREFIX, GH_TOKEN.
 # Writes: workspaces, one '<component> <deployment> <workspace>' per line
 #         (GITHUB_OUTPUT).
 set -euo pipefail
@@ -73,15 +73,21 @@ for dir in "${COMPONENTS_DIR}"/*/; do
     IFS=$'\t' read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "${creds}"
     export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 
-    # Same state key and workspace prefix as the deploy workflow.
-    terraform -chdir="${dir}" init -input=false \
-      -backend-config="bucket=${state_bucket_name}" \
-      -backend-config="key=${GITHUB_REPOSITORY##*/}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
-      -backend-config="region=${STATE_REGION}" \
-      -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}" \
-      -backend-config="use_lockfile=true" \
-      -backend-config="encrypt=true" \
-      -reconfigure >/dev/null
+    # Same state key, workspace prefix and locking as the deploy workflow.
+    lock_table="$(jq -r '.state_lock_table_name // ""' <<< "${entry}")"
+    backend_config=(
+      -backend-config="bucket=${state_bucket_name}"
+      -backend-config="key=${STATE_PREFIX}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate"
+      -backend-config="region=${STATE_REGION}"
+      -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}"
+      -backend-config="encrypt=true"
+    )
+    if [[ -n "${lock_table}" ]]; then
+      backend_config+=(-backend-config="dynamodb_table=${lock_table}" -backend-config="use_lockfile=false")
+    else
+      backend_config+=(-backend-config="use_lockfile=true")
+    fi
+    terraform -chdir="${dir}" init -input=false "${backend_config[@]}" -reconfigure >/dev/null
 
     # Captured first, so a failed list aborts instead of reading as empty.
     # sed strips the "* " marker on the selected workspace.

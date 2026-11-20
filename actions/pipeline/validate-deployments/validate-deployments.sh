@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Validate deployments.json as a whole: valid JSON, every entry complete, and
-# entries matched 1:1 to tfvars files. An old state_lock_table_name gets a notice.
+# entries matched 1:1 to tfvars files. An optional state_lock_table_name must be
+# a valid DynamoDB table name.
 # Usage: validate-deployments.sh <deployments-file> <components-dir>
 set -euo pipefail
 
@@ -14,8 +15,6 @@ REQUIRED_FIELDS=(
 
 DEPLOYMENTS_FILE="${1:?deployments-file required}"
 COMPONENTS_DIR="${2:?components-dir required}"
-# Drop a trailing slash so the sed pattern below matches find's output.
-COMPONENTS_DIR="${COMPONENTS_DIR%/}"
 
 problems=()
 
@@ -45,10 +44,10 @@ done <<< "${field_problems}"
 #    maps to <components-dir>/<component>/environments/<env>/<deployment>.tfvars.
 #    Only files at exactly that depth count, so tfvars elsewhere (tests/) are ignored.
 entry_keys="$(jq -r 'keys[]' "${DEPLOYMENTS_FILE}")"
-tfvars_keys="$(
-  find "${COMPONENTS_DIR}" -mindepth 4 -maxdepth 4 -type f -path '*/environments/*/*.tfvars' 2>/dev/null \
-    | sed -E "s#^${COMPONENTS_DIR}/([^/]+)/environments/([^/]+)/(.+)\.tfvars\$#\1/\2/\3#"
-)"
+# find runs inside components-dir so its paths are relative and the directory
+# name never reaches the sed pattern.
+tfvars_paths="$(cd -- "${COMPONENTS_DIR}" && find . -mindepth 4 -maxdepth 4 -type f -path '*/environments/*/*.tfvars')"
+tfvars_keys="$(sed -E 's#^\./([^/]+)/environments/([^/]+)/(.+)\.tfvars$#\1/\2/\3#' <<< "${tfvars_paths}")"
 
 # Turn each newline-separated key list into a JSON array (drops blank lines).
 entries_json="$(jq -Rn '[inputs | select(length > 0)]' <<< "${entry_keys}")"
@@ -65,10 +64,15 @@ done < <(
   '
 )
 
-# 4. state_lock_table_name is unused with S3 locking: notice only.
-while IFS= read -r k; do
-  [[ -n "${k}" ]] && echo "::notice::${k}: state_lock_table_name is ignored because state locking uses S3 (use_lockfile); it can be removed."
-done < <(jq -r 'to_entries[] | select((.value | type) == "object" and (.value | has("state_lock_table_name"))) | .key' "${DEPLOYMENTS_FILE}")
+# 4. state_lock_table_name is optional. When set, that entry locks state with
+#    the DynamoDB table instead of S3. init builds its arguments for eval, so
+#    only DynamoDB's own name characters are allowed.
+while IFS= read -r line; do
+  [[ -n "${line}" ]] && problems+=("${line}")
+done < <(jq -r 'to_entries[]
+  | select((.value | type) == "object" and (.value | has("state_lock_table_name")))
+  | select((.value.state_lock_table_name | type) != "string" or (.value.state_lock_table_name | test("^[A-Za-z0-9_.-]{3,255}$") | not))
+  | "\(.key): state_lock_table_name must be 3 to 255 letters, digits and _ . - when set"' "${DEPLOYMENTS_FILE}")
 
 if [[ "${#problems[@]}" -gt 0 ]]; then
   echo "::error::deployments.json is invalid:"

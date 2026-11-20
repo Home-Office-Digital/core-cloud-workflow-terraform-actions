@@ -1,0 +1,34 @@
+name: "Resolve terraform-dir"
+description: "Resolve terraform-dir into the values the pipeline builds from it. Fails on a path that is not a plain relative one, and returns the plan artifact slug, the state key prefix and the deployments.json path."
+# Runs first in each workflow, so a bad folder fails before it reaches a shell,
+# a path or a state key. The folder joins the state key and the artifact name
+# only when it isn't source/terraform, which keeps default names unchanged.
+# Concurrency groups are expressions, so they add the folder inline.
+inputs:
+  terraform-dir:
+    description: "Directory holding components/, modules/ and deployments.json. A relative path of segments separated by /, each of letters, digits and . _ - only, not starting with -. No leading ./ or /, no trailing /, no . or .. segment."
+    required: true
+  deployments-file:
+    description: "Path to deployments.json. Leave empty to use <terraform-dir>/deployments.json."
+    required: false
+    default: ""
+outputs:
+  slug:
+    description: "Empty for source/terraform, otherwise _<terraform-dir> with / as -. Goes after terraform-plan in the plan artifact name. Used for nothing else."
+    value: ${{ steps.resolve.outputs.slug }}
+  state-prefix:
+    description: "The start of every state key: <repo>, or <repo>/<terraform-dir> (with / kept) when terraform-dir is not source/terraform."
+    value: ${{ steps.resolve.outputs.state-prefix }}
+  deployments-file:
+    description: "The deployments.json path: the input when set, otherwise <terraform-dir>/deployments.json."
+    value: ${{ steps.resolve.outputs.deployments-file }}
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve terraform-dir
+      id: resolve
+      shell: bash
+      env:
+        TERRAFORM_DIR: ${{ inputs.terraform-dir }}
+        DEPLOYMENTS_FILE: ${{ inputs.deployments-file }}
+      run: ${{ github.action_path }}/resolve-terraform-dir.sh

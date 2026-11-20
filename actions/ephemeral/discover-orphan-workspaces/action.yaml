@@ -12,7 +12,7 @@ inputs:
     description: "'all' (closed/merged PRs) or 'pr-<n>' (one PR, any state)."
     required: true
   environment:
-    description: "The ephemeral environment whose deployments are scanned, e.g. dev."
+    description: "The ephemeral environment whose deployments are scanned, e.g. development."
     required: true
   components-dir:
     description: "Directory whose immediate subdirectories are the components."
@@ -25,6 +25,9 @@ inputs:
     description: "AWS region for the state backend."
     required: false
     default: "eu-west-2"
+  state-prefix:
+    description: "The start of the state key: the repo name, plus the terraform-dir when it is not the default. Output by resolve-terraform-dir."
+    required: true
 
 outputs:
   workspaces:
@@ -45,4 +48,5 @@ runs:
         COMPONENTS_DIR: ${{ inputs.components-dir }}
         DEPLOYMENTS_FILE: ${{ inputs.deployments-file }}
         STATE_REGION: ${{ inputs.aws-region }}
+        STATE_PREFIX: ${{ inputs.state-prefix }}
       run: ${{ github.action_path }}/discover-orphan-workspaces.sh

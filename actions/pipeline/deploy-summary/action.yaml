@@ -1,0 +1,67 @@
+name: "Deploy summary"
+description: "Write a short deploy-run summary (environment, version, mode, legs, or why the run skipped or stopped) to the job summary."
+# Every input is optional, so a summary is still written when preflight stops
+# early.
+inputs:
+  skip:
+    description: "'true' when the run does nothing."
+    required: false
+    default: ""
+  environment:
+    description: "Resolved target environment."
+    required: false
+    default: ""
+  version:
+    description: "Resolved version (branch, tag or commit SHA)."
+    required: false
+    default: ""
+  ephemeral:
+    description: "'true' or 'false'."
+    required: false
+    default: ""
+  pr-number:
+    description: "Open PR number for an ephemeral run."
+    required: false
+    default: ""
+  plan-only:
+    description: "'true' when the run plans without applying."
+    required: false
+    default: ""
+  include:
+    description: "JSON array of {component, deployment} objects."
+    required: false
+    default: ""
+  job-status:
+    description: "Status of the calling job (success, failure, cancelled)."
+    required: false
+    default: ""
+  event-name:
+    description: "Name of the triggering event."
+    required: false
+    default: ""
+  event-action:
+    description: "Action of the triggering event, if any."
+    required: false
+    default: ""
+  prerelease:
+    description: "'true' when the release event is a pre-release."
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Write summary
+      shell: bash
+      env:
+        SKIP: ${{ inputs.skip }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION: ${{ inputs.version }}
+        EPHEMERAL: ${{ inputs.ephemeral }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        PLAN_ONLY: ${{ inputs.plan-only }}
+        INCLUDE: ${{ inputs.include }}
+        JOB_STATUS: ${{ inputs.job-status }}
+        EVENT_NAME: ${{ inputs.event-name }}
+        EVENT_ACTION: ${{ inputs.event-action }}
+        PRERELEASE: ${{ inputs.prerelease }}
+      run: ${{ github.action_path }}/deploy-summary.sh

@@ -38,6 +38,11 @@ inputs:
     required: false
     type: string
     default: "terraform.tfstate"
+  workspace-key-prefix:
+    description: "S3 backend workspace_key_prefix. Leave unset for Terraform's default ('env:') — existing behaviour. Set a repo-scoped value (e.g. 'env:<repo>') to confine workspace listing to this repo in a shared bucket. Allowed characters: letters, digits and : . _ / - only; anything else fails validation."
+    required: false
+    type: string
+    default: ""
   state-use-lockfile:
     description: "Whether to pass use_lockfile to the S3 backend as -backend-config, which enables S3 native state locking. Accepts 'true' or 'false'. Leave unset to omit the argument entirely, which is the existing behaviour. Terraform supports this alongside dynamodb_table so a migration can be staged."
     required: false
@@ -53,6 +58,11 @@ inputs:
     required: false
     default: "true"
     type: boolean
+  workspace:
+    description: "Terraform workspace to select or create after init. Leave unset to skip selection (existing behaviour). Any value, including 'default', is selected explicitly, so a workspace left over from an earlier init in the same directory is never reused by mistake."
+    required: false
+    default: ""
+    type: string
   working-directory:
     description: "Directory containing main.tf"
     required: false
@@ -62,6 +72,20 @@ inputs:
 runs:
   using: composite
   steps:
+    # Runs first so a bad value fails before any credentials exist. The value is passed
+    # via env: and never interpolated into the script, because the Terraform Init step
+    # builds its arguments for `eval`.
+    - name: Validate workspace-key-prefix
+      if: ${{ inputs.workspace-key-prefix != '' }}
+      shell: bash
+      env:
+        WORKSPACE_KEY_PREFIX: ${{ inputs.workspace-key-prefix }}
+      run: |
+        if [[ ! "${WORKSPACE_KEY_PREFIX}" =~ ^[A-Za-z0-9:._/-]+$ ]]; then
+          echo "::error::invalid workspace-key-prefix '${WORKSPACE_KEY_PREFIX}': use letters, digits and : . _ / - only."
+          exit 1
+        fi
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
@@ -164,6 +188,10 @@ runs:
             INIT_OPTS="$INIT_OPTS -backend-config='dynamodb_table=${{ inputs.state-dynamodb-table }}'"
           fi
 
+          if [ -n "${{ inputs.workspace-key-prefix }}" ]; then
+            INIT_OPTS="$INIT_OPTS -backend-config='workspace_key_prefix=${{ inputs.workspace-key-prefix }}'"
+          fi
+
           # Appended only when set, so a caller passing neither reaches exactly the
           # command line this action built before. Both sit inside the use-backend branch
           # because there is no backend to configure when -backend=false.
@@ -181,3 +209,17 @@ runs:
         fi
 
         eval terraform init $INIT_OPTS
+
+    # Skipped only when workspace is unset, so callers that don't pass it keep
+    # the existing command sequence. An explicit 'default' is selected too: init
+    # keeps any earlier selection in .terraform/environment, so skipping it could
+    # leave a pr-* workspace active. The selection persists for later steps.
+    - name: Select Terraform workspace
+      if: ${{ inputs.workspace != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        WORKSPACE: ${{ inputs.workspace }}
+      run: |
+        set -euo pipefail
+        terraform workspace select -or-create "${WORKSPACE}"

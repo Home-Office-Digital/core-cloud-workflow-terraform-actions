@@ -1,0 +1,36 @@
+name: "Resolve ephemeral"
+description: "Check an ephemeral deploy (development environment only, branch must have an open PR) and output the PR number."
+
+# Checks and resolves in one step, because both come from the same PR lookup.
+# The caller names each workspace pr-<n>-<deployment>.
+
+inputs:
+  branch:
+    description: "Branch being deployed. It must have an open PR in this repository."
+    required: true
+  environment:
+    description: "Target environment for this deploy."
+    required: true
+  ephemeral-environment:
+    description: "The only environment an ephemeral deploy may target."
+    required: false
+    default: "dev"
+
+outputs:
+  pr-number:
+    description: "The open PR number for the branch. The caller forms pr-<number>-<deployment> workspace names."
+    value: ${{ steps.resolve.outputs.pr-number }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve ephemeral PR
+      id: resolve
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ inputs.branch }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        EPHEMERAL_ENVIRONMENT: ${{ inputs.ephemeral-environment }}
+      run: ${{ github.action_path }}/resolve-ephemeral.sh

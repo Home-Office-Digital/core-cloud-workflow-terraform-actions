@@ -1,0 +1,48 @@
+name: "Discover orphan workspaces"
+description: "List ephemeral pr-* workspaces to tear down, by scope, as newline-separated '<component> <deployment> <workspace>' lines."
+
+# Workspaces are named pr-<n>-<deployment>. Scope decides which to destroy:
+#   all     workspaces whose PR is closed or merged
+#   pr-<n>  that PR's workspaces, in any state
+#
+# Authenticates per leg, because legs can be in different accounts. Read-only.
+
+inputs:
+  scope:
+    description: "'all' (closed/merged PRs) or 'pr-<n>' (one PR, any state)."
+    required: true
+  environment:
+    description: "The ephemeral environment whose deployments are scanned, e.g. dev."
+    required: true
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components."
+    required: false
+    default: "source/terraform/components"
+  deployments-file:
+    description: "Path to the committed deployments.json (relative to the checked-out repo), keyed '<component>/<env>/<deployment>'. The apply role and state bucket are read per leg from here."
+    required: true
+  aws-region:
+    description: "AWS region for the state backend."
+    required: false
+    default: "eu-west-2"
+
+outputs:
+  workspaces:
+    description: "Newline-separated '<component> <deployment> <workspace>' lines to destroy. Empty if none."
+    value: ${{ steps.discover.outputs.workspaces }}
+
+runs:
+  using: composite
+  steps:
+    - name: Discover orphan workspaces
+      id: discover
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        SCOPE: ${{ inputs.scope }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+        DEPLOYMENTS_FILE: ${{ inputs.deployments-file }}
+        STATE_REGION: ${{ inputs.aws-region }}
+      run: ${{ github.action_path }}/discover-orphan-workspaces.sh

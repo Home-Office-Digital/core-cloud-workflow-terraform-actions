@@ -1,0 +1,41 @@
+name: "Verify preconditions"
+description: "Gate a deploy before any plan: the version is an allowed ref and the target environment has a required-reviewers rule."
+
+inputs:
+  environment:
+    description: "Target environment. The gate check reads this environment's protection rules."
+    required: true
+  version:
+    description: >-
+      Git ref being deployed. Outside the development environment it must be main, master, or a
+      semver tag (v1.2.3 or 1.2.3, with an optional pre-release suffix such as
+      -rc.1), keeping them off arbitrary branches; the development environment
+      accepts any ref.
+    required: false
+    default: ""
+  development-environment:
+    description: "Environment for unreleased code, which skips the version check."
+    required: false
+    default: "dev"
+  github-token:
+    description: "Token with actions:read, used to read the environment's protection rules."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate version
+      if: ${{ inputs.environment != inputs.development-environment }}
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        VERSION: ${{ inputs.version }}
+      run: ${{ github.action_path }}/check-version.sh
+
+    - name: Verify environment approval gate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      run: ${{ github.action_path }}/check-gate.sh

@@ -1,0 +1,314 @@
+name: Terraform PR Validation
+
+# Reusable PR validation workflow. Plans with the read-only plan role and never
+# applies.
+#   preflight      once: validate deployments.json, expand legs, find tests
+#   lint           once: fmt and TFLint
+#   test           per component and module with tests
+#   plan           per leg: init, validate, plan
+# Every component is planned on every PR, so a shared-module change shows its
+# effect on each consumer. With `plan: false` no plans run.
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: >-
+          Plan each deployment against real state. Set false for a module-only
+          repository: only fmt, TFLint and terraform test run, with no
+          deployments.json, AWS access or state.
+        required: false
+        default: true
+        type: boolean
+      aws-region:
+        description: "AWS region of the state bucket."
+        default: eu-west-2
+        required: false
+        type: string
+      environment:
+        description: >-
+          Environment whose state each plan runs against. Nothing is deployed.
+        required: false
+        default: "dev"
+        type: string
+      terraform-version:
+        description: >-
+          Terraform version to use. S3-native state locking needs 1.10+. Pass
+          the same exact version as the deploy caller.
+        required: false
+        default: ">= 1.10.0"
+        type: string
+      deployments-file:
+        description: >-
+          Path to deployments.json, keyed "<component>/<env>/<deployment>".
+          Only account_id, plan_role_name and state_bucket_name are used.
+        required: false
+        type: string
+        default: "source/terraform/deployments.json"
+      tf-aws-tag-policy-compliance:
+        description: "AWS provider tag-policy compliance: 'warning', 'error' or empty. Exported as TF_AWS_TAG_POLICY_COMPLIANCE. Same as standard-pipeline."
+        required: false
+        type: string
+        default: ""
+      runner:
+        description: "Runner label for the plan jobs. The rest run on ubuntu-latest. Same as standard-pipeline."
+        required: false
+        default: "ubuntu-latest"
+        type: string
+    secrets:
+      github_app_client_id:
+        description: "GitHub App client ID for private module sources. Set with github_app_private_key; the workflow mints a token and configures git for github.com."
+        required: false
+      github_app_private_key:
+        description: "GitHub App private key for private module sources. Set with github_app_client_id."
+        required: false
+      git_auth_token:
+        description: "Token for private module sources, used when no GitHub App is set. The workflow configures git for github.com with it."
+        required: false
+      sonar_host_url:
+        description: "Ignored. SonarQube runs in the repository's own scan workflow; kept so existing callers don't fail."
+        required: false
+      sonar_token:
+        description: "Ignored. SonarQube runs in the repository's own scan workflow; kept so existing callers don't fail."
+        required: false
+      DYNATRACE_ENVIRONMENT_ID:
+        required: false
+      DYNATRACE_PLATFORM_TOKEN:
+        required: false
+
+# Read-only by default; only the plan legs request OIDC. GitHub checks every
+# job's permissions against the caller's grant before `if:` is evaluated, so
+# every caller, including plan: false, must grant id-token: write.
+permissions:
+  contents: read
+
+# One run at a time per caller and PR, so two pushes don't plan the same state at
+# once. Queued, not cancelled: a newer run waits for the active one (a run still
+# waiting is replaced), so a newer push never stops a plan holding the lock.
+# github.workflow is the caller's name, so two callers on one PR keep separate groups.
+concurrency:
+  group: tf-pr-validation_${{ github.workflow }}_${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Builds the plan and test matrices and writes the summary. Selectors are always 'all'.
+  preflight:
+    name: "preflight"
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.expand.outputs.include }}
+      test-targets: ${{ steps.test-targets.outputs.targets }}
+    steps:
+      # Catch a typo once, before any leg runs.
+      - name: Validate tag-policy setting
+        env:
+          TAG_POLICY: ${{ inputs.tf-aws-tag-policy-compliance }}
+        run: |
+          case "$TAG_POLICY" in
+            ""|warning|error) ;;
+            *)
+              echo "::error::tf-aws-tag-policy-compliance must be 'warning', 'error' or empty; got '$TAG_POLICY'."
+              exit 1
+              ;;
+          esac
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The whole file, every environment, so a broken config fails the PR.
+      - name: Validate deployments.json
+        if: ${{ inputs.plan }}
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/validate-deployments@1.3.0
+        with:
+          deployments-file: ${{ inputs.deployments-file }}
+
+      - name: Expand deployments
+        id: expand
+        if: ${{ inputs.plan }}
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/expand-deployments@1.3.0
+        with:
+          component: all
+          deployment: all
+          environment: ${{ inputs.environment }}
+          # As in deploy: components without this environment are skipped with a notice.
+          missing-environment: skip
+
+      - name: Find test targets
+        id: test-targets
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/find-test-targets@1.3.0
+        with:
+          include-modules: "true"
+
+      # Runs even when an earlier step failed, so a stopped run still explains itself.
+      - name: Write summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PLAN: ${{ inputs.plan }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          INCLUDE: ${{ steps.expand.outputs.include }}
+          TARGETS: ${{ steps.test-targets.outputs.targets }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          # Values come from env and jq, never interpolated into the script.
+          names() { jq -r 'if type == "array" and length > 0 then map("`" + (if type == "object" then "\(.component)/\(.deployment)" else tostring end) + "`") | join(", ") else "none" end' <<< "${1:-[]}" 2>/dev/null || echo "none"; }
+          tests="$(jq -r 'if type == "array" and length > 0 then map("`" + .name + "`") | join(", ") else "none" end' <<< "${TARGETS:-[]}" 2>/dev/null || echo "none")"
+          {
+            echo "### PR validation"
+            if [[ "${JOB_STATUS}" != "success" ]]; then
+              echo "Stopped in preflight; see the failed step."
+            fi
+            if [[ "${PLAN}" == "true" ]]; then
+              echo "- **Plans against:** \`${ENVIRONMENT}\`"
+              echo "- **Legs:** $(names "${INCLUDE}")"
+            else
+              echo "- **Plans:** off (\`plan: false\`)"
+            fi
+            echo "- **Tests:** ${tests}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # fmt and TFLint over source/terraform, once per run.
+  lint:
+    name: "Lint"
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Terraform Fmt
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/fmt@1.3.0
+        with:
+          working-directory: source/terraform
+          recursive: true
+          terraform-version: ${{ inputs.terraform-version }}
+
+      - name: TFLint
+        uses: Home-Office-Digital/core-cloud-workflow-tflint-scan@268b840d0e48fa86be281a5727909655311f7af4 # 0.3.2
+        with:
+          working_directory: source/terraform
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # One job per component and module with tests. Init has no backend, so tests
+  # never touch state or AWS; use mock providers.
+  test:
+    name: "Test ${{ matrix.target.name }}"
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && needs.preflight.outputs.test-targets != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.preflight.outputs.test-targets) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Git auth
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        with:
+          github-app-client-id: ${{ secrets.github_app_client_id }}
+          github-app-private-key: ${{ secrets.github_app_private_key }}
+          git-auth-token: ${{ secrets.git_auth_token }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Terraform Init (no backend)
+        working-directory: ${{ matrix.target.dir }}
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform Test
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/test@1.3.0
+        with:
+          working-directory: ${{ matrix.target.dir }}
+
+  plan:
+    name: "Plan ${{ matrix.component }}/${{ matrix.deployment }} (${{ inputs.environment }})"
+    needs: preflight
+    # Runs alongside lint and test.
+    if: ${{ needs.preflight.result == 'success' && inputs.plan }}
+    runs-on: ${{ inputs.runner }}
+    # No `environment:`, so plans never wait for approval. fail-fast is off so
+    # every leg reports its plan.
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.include) }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      # Dynatrace provider credentials; empty when not passed.
+      DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
+      DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}
+      TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
+      component-working-directory: source/terraform/components/${{ matrix.component }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve leg config
+        id: account
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/resolve-account@1.3.0
+        with:
+          deployments-file: ${{ inputs.deployments-file }}
+          component: ${{ matrix.component }}
+          environment: ${{ inputs.environment }}
+          deployment: ${{ matrix.deployment }}
+
+      - name: Git auth
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/pipeline/git-auth@1.3.0
+        with:
+          github-app-client-id: ${{ secrets.github_app_client_id }}
+          github-app-private-key: ${{ secrets.github_app_private_key }}
+          git-auth-token: ${{ secrets.git_auth_token }}
+
+      - name: Terraform Init
+        id: init
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/init@1.3.0
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.plan-role-name }}
+          state-bucket: ${{ steps.account.outputs.state-bucket-name }}
+          # S3-native locking; no DynamoDB table.
+          state-encrypt: "true"
+          state-use-lockfile: "true"
+          # The deploy's state key, so the plan shows real drift.
+          state-key: ${{ steps.account.outputs.state-key }}
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.component-working-directory }}
+
+      - name: Terraform Validate
+        if: success() || failure()
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/validate@1.3.0
+        with:
+          terraform-version: ${{ inputs.terraform-version }}
+          working-directory: ${{ env.component-working-directory }}
+
+      - name: Terraform Plan
+        id: plan
+        uses: Home-Office-Digital/core-cloud-workflow-terraform-actions/actions/plan@1.3.0
+        with:
+          account_id: ${{ steps.account.outputs.account-id }}
+          aws-region: ${{ inputs.aws-region }}
+          github-environment: ${{ inputs.environment }}
+          role-to-assume: ${{ steps.account.outputs.plan-role-name }}
+          terraform-version: ${{ inputs.terraform-version }}
+          tfvars-file: environments/${{ inputs.environment }}/${{ matrix.deployment }}.tfvars
+          working-directory: ${{ env.component-working-directory }}
+          # Per-leg name, as in deploy, so parallel legs don't collide.
+          artifact-name: terraform-plan_${{ matrix.component }}_${{ matrix.deployment }}_${{ inputs.environment }}

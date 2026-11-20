@@ -1,0 +1,43 @@
+name: "Find test targets"
+description: "List the component and module directories that contain Terraform tests, as a matrix-ready JSON array."
+# A directory is a test target when it holds at least one *.tftest.hcl, either
+# directly or in its tests/ subdirectory (the two places `terraform test` looks by
+# default). Components are the immediate subdirectories of components-dir; modules
+# are the immediate subdirectories of modules-dir.
+inputs:
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components (relative to the repo root)."
+    required: false
+    default: "source/terraform/components"
+  modules-dir:
+    description: "Directory whose immediate subdirectories are the modules (relative to the repo root)."
+    required: false
+    default: "source/terraform/modules"
+  components:
+    description: >-
+      Optional restriction on which components are considered. A JSON array of
+      component names (["component-a"]) or of objects with a "component" key, so
+      expand-deployments' `include` output can be passed as-is (duplicates are
+      collapsed). Empty or omitted means every component. "[]" means none.
+    required: false
+    default: ""
+  include-modules:
+    description: "Whether to also scan modules-dir: 'true' or 'false'."
+    required: false
+    default: "true"
+outputs:
+  targets:
+    description: "JSON array of {name, dir} objects sorted by name, e.g. [{\"name\":\"modules/example\",\"dir\":\"source/terraform/modules/example\"}]; [] when nothing has tests."
+    value: ${{ steps.find.outputs.targets }}
+runs:
+  using: "composite"
+  steps:
+    - name: Find directories containing Terraform tests
+      id: find
+      shell: bash
+      env:
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+        MODULES_DIR: ${{ inputs.modules-dir }}
+        COMPONENTS_FILTER: ${{ inputs.components }}
+        INCLUDE_MODULES: ${{ inputs.include-modules }}
+      run: ${{ github.action_path }}/find-test-targets.sh

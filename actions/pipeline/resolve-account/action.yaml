@@ -1,0 +1,53 @@
+name: "Resolve leg config"
+description: "Resolve one leg's account id, roles, and state bucket from deployments.json by its full <component>/<env>/<deployment> key; fail if the entry or any field is missing."
+
+# Looked up with jq, so a missing key fails. A fromJSON() expression would
+# return an empty string and let a typo run with no account.
+
+inputs:
+  deployments-file:
+    description: >-
+      Path to the committed deployments.json, relative to the checked-out repo.
+      A JSON object keyed by the full leg identity "<component>/<env>/<deployment>",
+      each value an object { account_id, plan_role_name, apply_role_name,
+      state_bucket_name }. Exact lookup, no fallback.
+    required: true
+  component:
+    description: "Component name for this leg (first segment of the key)."
+    required: true
+  environment:
+    description: "Environment for this leg (second segment of the key)."
+    required: true
+  deployment:
+    description: "Deployment name for this leg (third segment of the key)."
+    required: true
+
+outputs:
+  account-id:
+    description: "The resolved AWS account id. Masked in logs."
+    value: ${{ steps.resolve.outputs.account-id }}
+  plan-role-name:
+    description: "The resolved read-only plan role name (name, not ARN)."
+    value: ${{ steps.resolve.outputs.plan-role-name }}
+  apply-role-name:
+    description: "The resolved apply role name (name, not ARN)."
+    value: ${{ steps.resolve.outputs.apply-role-name }}
+  state-bucket-name:
+    description: "The resolved Terraform state bucket name."
+    value: ${{ steps.resolve.outputs.state-bucket-name }}
+  state-key:
+    description: "The Terraform state key for this leg: <repo>/<component>/<env>/<deployment>/terraform.tfstate."
+    value: ${{ steps.resolve.outputs.state-key }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve leg config
+      id: resolve
+      shell: bash
+      env:
+        DEPLOYMENTS_FILE: ${{ inputs.deployments-file }}
+        COMPONENT: ${{ inputs.component }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        DEPLOYMENT: ${{ inputs.deployment }}
+      run: ${{ github.action_path }}/resolve-account.sh

@@ -1,0 +1,50 @@
+name: "Destroy workspaces"
+description: "Destroy and delete a list of ephemeral pr-* Terraform workspaces, authenticating per leg via OIDC."
+
+# Destroys, then deletes, each workspace listed by discover-orphan-workspaces.
+# One step loops the list, so scope=all doesn't become a job per PR.
+#
+# Authenticates per leg, as discover does, because legs can be in different
+# accounts.
+
+inputs:
+  workspaces:
+    description: "Newline-separated '<component> <deployment> <workspace>' lines, as output by discover-orphan-workspaces. Empty means nothing to do."
+    required: true
+  deployments-file:
+    description: "Path to the committed deployments.json (relative to the checked-out repo), keyed '<component>/<env>/<deployment>'. The apply role and state bucket are read per leg from here."
+    required: true
+  environment:
+    description: "The ephemeral environment whose state and tfvars are used, e.g. dev."
+    required: true
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components."
+    required: false
+    default: "source/terraform/components"
+  aws-region:
+    description: "AWS region for the state backend."
+    required: false
+    default: "eu-west-2"
+  terraform-version:
+    description: "Terraform version to use. S3-native state locking needs 1.10+."
+    required: false
+    default: ">= 1.10.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Destroy workspaces
+      shell: bash
+      env:
+        WORKSPACES: ${{ inputs.workspaces }}
+        DEPLOYMENTS_FILE: ${{ inputs.deployments-file }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+        AWS_REGION: ${{ inputs.aws-region }}
+      run: ${{ github.action_path }}/destroy-workspaces.sh

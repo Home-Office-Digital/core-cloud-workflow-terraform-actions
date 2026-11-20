@@ -1,0 +1,45 @@
+name: "Expand deployments"
+description: "Turn component/deployment/environment selectors into the {component, deployment} matrix to fan out over."
+
+inputs:
+  component:
+    description: "Component name, comma list, or 'all' (every subdirectory of components-dir). 'all' is reserved."
+    required: false
+    default: "all"
+  deployment:
+    description: "Deployment name (a tfvars basename), comma list, or 'all' (every tfvars for the component and environment). A name with no tfvars file is an error. 'all' is reserved."
+    required: false
+    default: "all"
+  environment:
+    description: "Environment to enumerate."
+    required: true
+  components-dir:
+    description: "Directory whose immediate subdirectories are the components."
+    required: false
+    default: "source/terraform/components"
+  missing-environment:
+    description: "When a selected component has no environments/<environment>/ directory: 'fail' (default) or 'skip' (notice and continue; still fails if nothing remains)."
+    required: false
+    default: "fail"
+
+outputs:
+  include:
+    description: "JSON array of {component, deployment} objects for a matrix include, e.g. [{\"component\":\"component-a\",\"deployment\":\"app\"}]."
+    value: ${{ steps.expand.outputs.include }}
+  skipped:
+    description: "JSON array of component names dropped by missing-environment=skip, e.g. [\"component-c\"]; [] when none."
+    value: ${{ steps.expand.outputs.skipped }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Expand component and deployment selectors to a matrix include-list
+      id: expand
+      shell: bash
+      env:
+        COMPONENT_INPUT: ${{ inputs.component }}
+        DEPLOYMENT_INPUT: ${{ inputs.deployment }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMPONENTS_DIR: ${{ inputs.components-dir }}
+        MISSING_ENVIRONMENT: ${{ inputs.missing-environment }}
+      run: ${{ github.action_path }}/expand-deployments.sh

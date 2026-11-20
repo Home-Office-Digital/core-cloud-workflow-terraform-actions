@@ -1,0 +1,73 @@
+name: "Resolve trigger"
+description: "Map the triggering event (workflow_dispatch, push or release) to a deploy mode, environment, version and ephemeral flag, or to a skip."
+
+# Composite inputs have their own defaults, so pass all three *-environment
+# inputs explicitly; an empty value disables that event.
+
+inputs:
+  event-name:
+    description: "Name of the triggering event. Selects the decision path."
+    required: false
+    default: ${{ github.event_name }}
+  event-path:
+    description: "Path to the event payload JSON. Empty means the script uses $GITHUB_EVENT_PATH."
+    required: false
+    default: ""
+  environment:
+    description: "Environment requested by a workflow_dispatch. Ignored for push and release."
+    required: false
+    default: ""
+  version:
+    description: "Version requested by a workflow_dispatch. Ignored for push and release."
+    required: false
+    default: ""
+  ephemeral:
+    description: "Ephemeral flag from a workflow_dispatch. Empty is treated as false."
+    required: false
+    default: ""
+  development-environment:
+    description: "Environment for unreleased code, deployed on a push to the default branch. Empty disables that event."
+    required: false
+    default: "dev"
+  pre-release-environment:
+    description: "Environment deployed on a published pre-release. Empty disables that event."
+    required: false
+    default: "test"
+  release-environment:
+    description: "Environment deployed on a released (promoted or stable) release. Empty disables that event."
+    required: false
+    default: "prod"
+
+outputs:
+  mode:
+    description: "dispatch, push or release; empty for an unsupported event."
+    value: ${{ steps.resolve.outputs.mode }}
+  skip:
+    description: "'true' when the run should do nothing, otherwise 'false'."
+    value: ${{ steps.resolve.outputs.skip }}
+  environment:
+    description: "The environment to deploy; empty when skipped."
+    value: ${{ steps.resolve.outputs.environment }}
+  version:
+    description: "The version to deploy (branch, tag or commit SHA); empty when skipped."
+    value: ${{ steps.resolve.outputs.version }}
+  ephemeral:
+    description: "'true' or 'false'; empty when skipped."
+    value: ${{ steps.resolve.outputs.ephemeral }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve trigger
+      id: resolve
+      shell: bash
+      env:
+        EVENT_NAME: ${{ inputs.event-name }}
+        EVENT_PATH: ${{ inputs.event-path }}
+        INPUT_ENVIRONMENT: ${{ inputs.environment }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_EPHEMERAL: ${{ inputs.ephemeral }}
+        DEVELOPMENT_ENVIRONMENT: ${{ inputs.development-environment }}
+        PRE_RELEASE_ENVIRONMENT: ${{ inputs.pre-release-environment }}
+        RELEASE_ENVIRONMENT: ${{ inputs.release-environment }}
+      run: ${{ github.action_path }}/resolve-trigger.sh

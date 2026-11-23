@@ -41,15 +41,14 @@ on:
       deployments-file:
         description: >-
           Path to deployments.json, keyed "<component>/<env>/<deployment>".
-          Every entry needs account_id, plan_role_name, apply_role_name and
-          state_bucket_name, because the whole file is validated. Plans use all but
-          apply_role_name, plus state_lock_table_name when set.
+          Each entry has account_id, plan_role_name, apply_role_name and
+          state_bucket_name, and optionally state_lock_table_name.
           Defaults to <terraform-dir>/deployments.json.
         required: false
         type: string
         default: ""
       terraform-dir:
-        description: "Directory holding components/, modules/ and deployments.json. A relative path such as infra/prod. Each segment uses letters, digits and . _ - and can't start with -. No leading or trailing /, and no . or .. segment."
+        description: "Folder holding components/, modules/ and deployments.json, such as infra/prod. Checked by resolve-terraform-dir."
         required: false
         type: string
         default: "source/terraform"

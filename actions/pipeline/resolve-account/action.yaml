@@ -22,7 +22,7 @@ inputs:
     description: "Deployment name for this leg (third segment of the key)."
     required: true
   state-prefix:
-    description: "The start of the state key: the repo name, plus the terraform-dir when it is not the default. Output by resolve-terraform-dir."
+    description: "State key prefix, from resolve-terraform-dir."
     required: true
 
 outputs:

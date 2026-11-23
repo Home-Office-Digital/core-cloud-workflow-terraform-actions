@@ -32,15 +32,15 @@ on:
         type: string
         default: ">= 1.10.0"
       terraform-dir:
-        description: "Directory holding components/, modules/ and deployments.json. A relative path such as infra/prod. Each segment uses letters, digits and . _ - and can't start with -. No leading or trailing /, and no . or .. segment. Must match the terraform-dir passed to terraform-multi-env-deploy.yml."
+        description: "Folder holding components/, modules/ and deployments.json, such as infra/prod. Checked by resolve-terraform-dir. Must match the deploy workflow's."
         required: false
         type: string
         default: "source/terraform"
       deployments-file:
         description: >-
           Path to deployments.json, keyed "<component>/<env>/<deployment>".
-          Only account_id, apply_role_name, state_bucket_name and an optional
-          state_lock_table_name are used.
+          Reads account_id, apply_role_name, state_bucket_name and, if set,
+          state_lock_table_name.
           Defaults to <terraform-dir>/deployments.json.
         required: false
         type: string

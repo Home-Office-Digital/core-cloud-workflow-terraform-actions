@@ -41,14 +41,15 @@ on:
       deployments-file:
         description: >-
           Path to deployments.json, keyed "<component>/<env>/<deployment>".
-          Only account_id, plan_role_name, state_bucket_name and an optional
-          state_lock_table_name are used.
+          Every entry needs account_id, plan_role_name, apply_role_name and
+          state_bucket_name, because the whole file is validated. Plans use all but
+          apply_role_name, plus state_lock_table_name when set.
           Defaults to <terraform-dir>/deployments.json.
         required: false
         type: string
         default: ""
       terraform-dir:
-        description: "Directory holding components/, modules/ and deployments.json. No leading ./ or trailing /."
+        description: "Directory holding components/, modules/ and deployments.json. A relative path such as infra/prod. Each segment uses letters, digits and . _ - and can't start with -. No leading or trailing /, and no . or .. segment."
         required: false
         type: string
         default: "source/terraform"
@@ -105,7 +106,8 @@ jobs:
     outputs:
       include: ${{ steps.expand.outputs.include }}
       test-targets: ${{ steps.test-targets.outputs.targets }}
-      # Names built from terraform-dir. See resolve-terraform-dir.
+      # From resolve-terraform-dir: the artifact slug, the state key prefix and
+      # the deployments.json path.
       dir-slug: ${{ steps.dir.outputs.slug }}
       state-prefix: ${{ steps.dir.outputs.state-prefix }}
       deployments-file: ${{ steps.dir.outputs.deployments-file }}
@@ -188,7 +190,7 @@ jobs:
             echo "- **Tests:** ${tests}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # fmt and TFLint over the Terraform directory, once per run.
+  # fmt and TFLint over terraform-dir, once per run.
   lint:
     name: "Lint"
     needs: preflight
@@ -308,7 +310,8 @@ jobs:
           role-to-assume: ${{ steps.account.outputs.plan-role-name }}
           state-bucket: ${{ steps.account.outputs.state-bucket-name }}
           state-encrypt: "true"
-          # S3-native locking, or the entry's DynamoDB lock table if it names one.
+          # S3-native locking, unless this leg's deployments.json entry names a
+          # DynamoDB lock table.
           state-use-lockfile: ${{ steps.account.outputs.state-use-lockfile }}
           state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
           # The deploy's state key, so the plan shows real drift.

@@ -20,8 +20,9 @@ apply_role_name="$(jq -r '.apply_role_name' <<< "${entry}")"
 state_bucket_name="$(jq -r '.state_bucket_name' <<< "${entry}")"
 
 state_key="${STATE_PREFIX}/${key}/terraform.tfstate"
-# S3-native locking unless the entry names a DynamoDB lock table. Terraform has
-# deprecated DynamoDB locking, so it is a fallback, and only one lock is taken.
+# S3-native locking unless the entry names a DynamoDB lock table, which is a
+# fallback because Terraform has deprecated it. With a table, the lockfile is
+# turned off, so each run takes one lock, not two.
 state_lock_table_name="$(jq -r '.state_lock_table_name // ""' <<< "${entry}")"
 state_use_lockfile="true"
 if [[ -n "${state_lock_table_name}" ]]; then

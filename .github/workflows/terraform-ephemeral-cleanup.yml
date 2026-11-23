@@ -32,7 +32,7 @@ on:
         type: string
         default: ">= 1.10.0"
       terraform-dir:
-        description: "Directory holding components/, modules/ and deployments.json. No leading ./ or trailing /. Must match the terraform-dir passed to terraform-multi-env-deploy.yml."
+        description: "Directory holding components/, modules/ and deployments.json. A relative path such as infra/prod. Each segment uses letters, digits and . _ - and can't start with -. No leading or trailing /, and no . or .. segment. Must match the terraform-dir passed to terraform-multi-env-deploy.yml."
         required: false
         type: string
         default: "source/terraform"

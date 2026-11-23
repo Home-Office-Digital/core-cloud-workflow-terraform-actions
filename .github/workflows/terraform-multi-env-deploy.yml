@@ -63,7 +63,7 @@ on:
         type: string
         default: "1.17.2"
       terraform-dir:
-        description: "Directory holding components/, modules/ and deployments.json. No leading ./ or trailing /."
+        description: "Directory holding components/, modules/ and deployments.json. A relative path such as infra/prod. Each segment uses letters, digits and . _ - and can't start with -. No leading or trailing /, and no . or .. segment."
         required: false
         type: string
         default: "source/terraform"
@@ -145,7 +145,8 @@ jobs:
       pr-number: ${{ steps.ephemeral.outputs.pr-number }}
       include: ${{ steps.expand.outputs.include }}
       test-targets: ${{ steps.test-targets.outputs.targets }}
-      # Names built from terraform-dir. See resolve-terraform-dir.
+      # From resolve-terraform-dir: the artifact slug, the state key prefix and
+      # the deployments.json path.
       dir-slug: ${{ steps.dir.outputs.slug }}
       state-prefix: ${{ steps.dir.outputs.state-prefix }}
       deployments-file: ${{ steps.dir.outputs.deployments-file }}
@@ -263,7 +264,8 @@ jobs:
           event-action: ${{ github.event.action }}
           prerelease: ${{ github.event.release.prerelease }}
 
-  # fmt and TFLint over the Terraform directory, once per run. Gates apply, not plan.
+  # fmt and TFLint over terraform-dir, once per run. Apply waits for it; plan
+  # doesn't.
   lint:
     name: "Lint"
     needs: preflight
@@ -395,7 +397,8 @@ jobs:
           role-to-assume: ${{ steps.account.outputs.plan-role-name }}
           state-bucket: ${{ steps.account.outputs.state-bucket-name }}
           state-encrypt: "true"
-          # S3-native locking, or the entry's DynamoDB lock table if it names one.
+          # S3-native locking, unless this leg's deployments.json entry names a
+          # DynamoDB lock table.
           state-use-lockfile: ${{ steps.account.outputs.state-use-lockfile }}
           state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
           state-key: ${{ steps.account.outputs.state-key }}
@@ -488,7 +491,8 @@ jobs:
           role-to-assume: ${{ steps.account.outputs.apply-role-name }}
           state-bucket: ${{ steps.account.outputs.state-bucket-name }}
           state-encrypt: "true"
-          # S3-native locking, or the entry's DynamoDB lock table if it names one.
+          # S3-native locking, unless this leg's deployments.json entry names a
+          # DynamoDB lock table.
           state-use-lockfile: ${{ steps.account.outputs.state-use-lockfile }}
           state-dynamodb-table: ${{ steps.account.outputs.state-lock-table-name }}
           state-key: ${{ steps.account.outputs.state-key }}

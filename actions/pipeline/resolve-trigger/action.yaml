@@ -28,15 +28,15 @@ inputs:
   development-environment:
     description: "Environment for unreleased code, deployed on a push to the default branch. Empty disables that event."
     required: false
-    default: "dev"
+    default: "development"
   pre-release-environment:
     description: "Environment deployed on a published pre-release. Empty disables that event."
     required: false
-    default: "test"
+    default: "pre-release"
   release-environment:
     description: "Environment deployed on a released (promoted or stable) release. Empty disables that event."
     required: false
-    default: "prod"
+    default: "release"
 
 outputs:
   mode:

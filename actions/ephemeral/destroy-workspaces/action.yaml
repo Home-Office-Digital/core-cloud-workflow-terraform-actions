@@ -15,7 +15,7 @@ inputs:
     description: "Path to the committed deployments.json (relative to the checked-out repo), keyed '<component>/<env>/<deployment>'. The apply role and state bucket are read per leg from here."
     required: true
   environment:
-    description: "The ephemeral environment whose state and tfvars are used, e.g. dev."
+    description: "The ephemeral environment whose state and tfvars are used, e.g. development."
     required: true
   components-dir:
     description: "Directory whose immediate subdirectories are the components."
@@ -25,6 +25,9 @@ inputs:
     description: "AWS region for the state backend."
     required: false
     default: "eu-west-2"
+  state-prefix:
+    description: "State key prefix, from resolve-terraform-dir."
+    required: true
   terraform-version:
     description: "Terraform version to use. S3-native state locking needs 1.10+."
     required: false
@@ -47,4 +50,5 @@ runs:
         ENVIRONMENT: ${{ inputs.environment }}
         COMPONENTS_DIR: ${{ inputs.components-dir }}
         AWS_REGION: ${{ inputs.aws-region }}
+        STATE_PREFIX: ${{ inputs.state-prefix }}
       run: ${{ github.action_path }}/destroy-workspaces.sh

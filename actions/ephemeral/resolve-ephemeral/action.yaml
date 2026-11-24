@@ -14,7 +14,7 @@ inputs:
   ephemeral-environment:
     description: "The only environment an ephemeral deploy may target."
     required: false
-    default: "dev"
+    default: "development"
 
 outputs:
   pr-number:

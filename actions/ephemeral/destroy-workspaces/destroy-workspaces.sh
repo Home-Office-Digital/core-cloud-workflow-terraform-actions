@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Destroy and delete each listed pr-* workspace.
-# Env: WORKSPACES, DEPLOYMENTS_FILE, ENVIRONMENT, COMPONENTS_DIR, AWS_REGION.
+# Env: WORKSPACES, DEPLOYMENTS_FILE, ENVIRONMENT, COMPONENTS_DIR, AWS_REGION,
+#      STATE_PREFIX.
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -33,15 +34,21 @@ while read -r component deployment workspace; do
   IFS=$'\t' read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "${creds}"
   export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 
-  # Same state key and workspace prefix as the deploy workflow.
-  terraform -chdir="${dir}" init -input=false \
-    -backend-config="bucket=${state_bucket_name}" \
-    -backend-config="key=${GITHUB_REPOSITORY##*/}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate" \
-    -backend-config="region=${AWS_REGION}" \
-    -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}" \
-    -backend-config="use_lockfile=true" \
-    -backend-config="encrypt=true" \
-    -reconfigure
+  # Same state key, workspace prefix and locking as the deploy workflow.
+  lock_table="$(jq -r '.state_lock_table_name // ""' <<< "${entry}")"
+  backend_config=(
+    -backend-config="bucket=${state_bucket_name}"
+    -backend-config="key=${STATE_PREFIX}/${component}/${ENVIRONMENT}/${deployment}/terraform.tfstate"
+    -backend-config="region=${AWS_REGION}"
+    -backend-config="workspace_key_prefix=env:${GITHUB_REPOSITORY##*/}"
+    -backend-config="encrypt=true"
+  )
+  if [[ -n "${lock_table}" ]]; then
+    backend_config+=(-backend-config="dynamodb_table=${lock_table}" -backend-config="use_lockfile=false")
+  else
+    backend_config+=(-backend-config="use_lockfile=true")
+  fi
+  terraform -chdir="${dir}" init -input=false "${backend_config[@]}" -reconfigure
 
   terraform -chdir="${dir}" workspace select "${workspace}"
   terraform -chdir="${dir}" destroy -auto-approve -input=false \

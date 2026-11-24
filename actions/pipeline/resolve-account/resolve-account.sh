@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Look up one leg's account, roles and state bucket, and build its state key.
-# Env: DEPLOYMENTS_FILE, COMPONENT, ENVIRONMENT, DEPLOYMENT.
+# Env: DEPLOYMENTS_FILE, COMPONENT, ENVIRONMENT, DEPLOYMENT, STATE_PREFIX.
 # Writes: account-id, plan-role-name, apply-role-name, state-bucket-name,
-#         state-key (GITHUB_OUTPUT).
+#         state-key, state-lock-table-name, state-use-lockfile (GITHUB_OUTPUT).
 set -euo pipefail
 
 key="${COMPONENT}/${ENVIRONMENT}/${DEPLOYMENT}"
@@ -19,8 +19,15 @@ plan_role_name="$(jq -r '.plan_role_name' <<< "${entry}")"
 apply_role_name="$(jq -r '.apply_role_name' <<< "${entry}")"
 state_bucket_name="$(jq -r '.state_bucket_name' <<< "${entry}")"
 
-# Prefixed with the repo name, so repos sharing a bucket can't collide.
-state_key="${GITHUB_REPOSITORY##*/}/${key}/terraform.tfstate"
+state_key="${STATE_PREFIX}/${key}/terraform.tfstate"
+# S3-native locking unless the entry names a DynamoDB lock table, which is a
+# fallback because Terraform has deprecated it. With a table, the lockfile is
+# turned off, so each run takes one lock, not two.
+state_lock_table_name="$(jq -r '.state_lock_table_name // ""' <<< "${entry}")"
+state_use_lockfile="true"
+if [[ -n "${state_lock_table_name}" ]]; then
+  state_use_lockfile="false"
+fi
 
 # Role and bucket names aren't secret; the account id is masked.
 echo "::add-mask::${account_id}"
@@ -30,4 +37,6 @@ echo "::add-mask::${account_id}"
   echo "apply-role-name=${apply_role_name}"
   echo "state-bucket-name=${state_bucket_name}"
   echo "state-key=${state_key}"
+  echo "state-lock-table-name=${state_lock_table_name}"
+  echo "state-use-lockfile=${state_use_lockfile}"
 } >> "${GITHUB_OUTPUT}"

@@ -16,7 +16,7 @@ inputs:
   development-environment:
     description: "Environment for unreleased code, which skips the version check."
     required: false
-    default: "dev"
+    default: "development"
   github-token:
     description: "Token with actions:read, used to read the environment's protection rules."
     required: true

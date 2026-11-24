@@ -226,3 +226,28 @@ jobs:
     secrets:
       account_id: ${{ secrets.ACCOUNT_ID }}
 ```
+
+### Global tags
+
+`standard-pipeline.yml` reads the calling repository's `GLOBAL_TAGS` configuration
+variable and exports it as `TF_VAR_global_tags` for subsequent Terraform steps.
+The value must be a JSON object, for example `{"service": "example"}`. If it is
+unset or empty, no variable is exported, preserving existing Terraform defaults
+and tfvars behaviour. Explicit values in tfvars files take precedence.
+
+Declare and use the variable in your Terraform configuration:
+
+```hcl
+variable "global_tags" {
+  type = map(string)
+}
+
+provider "aws" {
+  default_tags {
+    tags = var.global_tags
+  }
+}
+```
+
+No caller `env`, workflow input or temporary tfvars file is needed. Version
+`1.2.6` does not include this export; use `@main` or a release containing the fix.

@@ -150,6 +150,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Export Global Tags
+        if: ${{ vars.GLOBAL_TAGS != '' }}
+        shell: bash
+        env:
+          GLOBAL_TAGS: ${{ vars.GLOBAL_TAGS }}
+        run: |
+          tags=$(jq -c . <<< "$GLOBAL_TAGS")
+          printf 'TF_VAR_global_tags=%s\n' "$tags" >> "$GITHUB_ENV"
+
       - name: Use github appid and key
         if: ${{ env.GITHUB_APP_CLIENT_ID != '' && env.GITHUB_APP_PRIVATE_KEY != '' }}
         id: app-token

@@ -248,3 +248,14 @@ jobs:
     secrets:
       account_id: ${{ secrets.ACCOUNT_ID }}
 ```
+
+### Global tags
+
+`standard-pipeline.yml` passes the calling repository's `GLOBAL_TAGS`
+configuration variable unchanged as the job-level `GLOBAL_TAGS` environment
+variable. No caller input or `env` is needed, and the value is not parsed or
+renamed to `TF_VAR_global_tags`.
+
+Terraform does not automatically map `GLOBAL_TAGS` to `var.global_tags`.
+Version `1.2.6` does not include this environment variable; use `@main` or a
+release containing the fix.

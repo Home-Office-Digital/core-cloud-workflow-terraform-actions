@@ -132,6 +132,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.github-environment }}
     env:
+      GLOBAL_TAGS: ${{ vars.GLOBAL_TAGS }}
       DYNATRACE_ENVIRONMENT_ID: ${{ secrets.DYNATRACE_ENVIRONMENT_ID }}
       DYNATRACE_PLATFORM_TOKEN: ${{ secrets.DYNATRACE_PLATFORM_TOKEN }}    
       TF_AWS_TAG_POLICY_COMPLIANCE: ${{ inputs.tf-aws-tag-policy-compliance }}
